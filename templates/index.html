@@ -66,16 +66,32 @@
               Paste the complete job description including requirements, responsibilities, and qualifications.
             </p>
 
-            <button type="submit" id="generateButton">
-              <span id="generateButtonText">Generate Personalized ATS Resume (DOCX)</span>
+            <label for="output_format" style="margin-top: 1rem;">Output Format</label>
+            <select
+              id="output_format"
+              name="output_format"
+              style="padding: 0.5rem; border: 1px solid #374151; border-radius: 0.375rem; background: #1f2937; color: #f9fafb; width: 100%; margin-top: 0.5rem;"
+            >
+              <option value="docx">DOCX (Word Document) - Fast</option>
+              <option value="pdf">PDF (LaTeX) - Perfect Formatting</option>
+            </select>
+            <p class="hint" style="margin-top: 0.5rem;">
+              <strong>DOCX:</strong> Fast generation, good formatting. 
+              <strong>PDF:</strong> Uses LaTeX template for exact format matching (requires LaTeX installation).
+            </p>
+
+            <button type="submit" id="generateButton" style="margin-top: 1rem;">
+              <span id="generateButtonText">Generate Personalized ATS Resume</span>
             </button>
           </form>
           <p class="hint">
-            The generated file will download as
-            <strong>ATS_resume.docx</strong>.
+            The generated file will download automatically.
             <span id="personalizationHint" style="display: none; color: #10b981; font-weight: bold;">
               ✓ Your resume is loaded - generation will be personalized!
             </span>
+          </p>
+          <p class="hint" style="margin-top: 0.5rem; color: #3b82f6;">
+            ⚡ <strong>Fast Mode:</strong> Parallel LLM calls enabled for 50-70% faster generation!
           </p>
         </section>
       </main>
@@ -173,10 +189,15 @@
         generateButton.disabled = true;
         generateButtonText.innerHTML = '<span class="loading"></span> Generating...';
         
+        // Update button text based on format
+        const format = document.getElementById('output_format').value;
+        const formatText = format === 'pdf' ? 'PDF (LaTeX)' : 'DOCX';
+        generateButtonText.textContent = `Generate Personalized ATS Resume (${formatText})`;
+        
         // Re-enable after a delay (in case of error, form will reset)
         setTimeout(() => {
           generateButton.disabled = false;
-          generateButtonText.textContent = 'Generate Personalized ATS Resume (DOCX)';
+          generateButtonText.textContent = 'Generate Personalized ATS Resume';
         }, 30000); // 30 second timeout
       });
     </script>

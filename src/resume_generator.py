@@ -21,6 +21,19 @@ from .models import ResumeData, Experience
 from .utils import deduplicate_preserve_order, normalize_keyword
 from .llm_client import rewrite_experience_bullets, rewrite_project_description, match_experience_with_jd
 
+# Try to import async versions for parallel execution
+try:
+    import asyncio
+    from .llm_client_async import (
+        prepare_resume_data_parallel,
+        rewrite_experience_bullets_async,
+        rewrite_project_description_async,
+        match_experience_with_jd_async
+    )
+    ASYNC_AVAILABLE = True
+except ImportError:
+    ASYNC_AVAILABLE = False
+
 # Import LLM condenser
 try:
     from .llm_condenser import condense_resume_for_one_page
@@ -61,11 +74,12 @@ LINE_SPACING = Pt(12)
 PARAGRAPH_SPACING = Pt(6)
 
 
-def generate_resume(
+async def generate_resume(
     output_path: str,
     keywords: List[str],
     resume_data: Optional[ResumeData] = None,
-    job_description: Optional[str] = None
+    job_description: Optional[str] = None,
+    use_parallel: bool = True
 ) -> None:
     """
     Generate a personalized, ATS-optimized resume in C3 format.
@@ -98,10 +112,23 @@ def generate_resume(
     # Set margins
     _set_margins(document)
     
+    # Prepare resume data with parallel LLM calls for speed (if enabled)
+    if use_parallel and ASYNC_AVAILABLE and resume_data and job_description:
+        try:
+            prioritized_experiences, personalized_projects = await prepare_resume_data_parallel(
+                resume_data, job_description, keywords
+            )
+            # Use the prepared data
+            resume_data.experience = prioritized_experiences
+            resume_data.projects = personalized_projects
+        except Exception as e:
+            print(f"Parallel LLM processing error: {e}. Using sequential processing.")
+    
     # Build resume sections (with more content now)
     _build_header(document, resume_data)
     _build_education(document, resume_data)
     _build_skills(document, resume_data, keywords)
+    # Build sections (data already prepared in parallel above if enabled)
     _build_experience(document, resume_data, keywords, job_description)
     _build_projects(document, resume_data, keywords, job_description)
     _build_certifications(document, resume_data)
