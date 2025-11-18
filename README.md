@@ -289,8 +289,6 @@ This app can be deployed to various platforms:
 - **Vercel** - Serverless functions (limited for long-running tasks)
 - **Fly.io** - Global distribution
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
-
 **Quick Deploy to Railway:**
 1. Push code to GitHub
 2. Go to https://railway.app and sign up with GitHub
@@ -298,7 +296,11 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
 4. Add `OPENAI_API_KEY` environment variable in Variables tab
 5. Railway auto-deploys! Get your URL from Settings → Domains
 
-**📚 See [RAILWAY_SETUP.md](./RAILWAY_SETUP.md) for detailed instructions.**
+**Detailed Railway Setup:**
+- Connect your GitHub repository to Railway
+- Railway automatically detects FastAPI and deploys
+- Add environment variables in the Variables tab
+- Your app will be live at `https://your-app.up.railway.app`
 
 ---
 

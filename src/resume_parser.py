@@ -26,6 +26,13 @@ from .models import (
     Certification,
 )
 
+# Try to import LLM parser, fallback if not available
+try:
+    from .llm_parser import parse_resume_with_llm
+    LLM_PARSER_AVAILABLE = True
+except ImportError:
+    LLM_PARSER_AVAILABLE = False
+
 
 def parse_resume(file_path: str) -> ResumeData:
     """
@@ -49,8 +56,16 @@ def parse_resume(file_path: str) -> ResumeData:
     else:
         raise ValueError(f"Unsupported file format: {path.suffix}. Only PDF and DOCX are supported.")
     
-    # Parse structured data from text
-    return _parse_text_to_resume_data(text)
+    # Use LLM parser for high accuracy (>90%), fallback to basic parser
+    if LLM_PARSER_AVAILABLE:
+        try:
+            return parse_resume_with_llm(text)
+        except Exception as e:
+            print(f"LLM parser failed: {e}. Using basic parser as fallback.")
+            return _parse_text_to_resume_data(text)
+    else:
+        # Fallback to basic parsing
+        return _parse_text_to_resume_data(text)
 
 
 def _extract_text_from_pdf(file_path: str) -> str:

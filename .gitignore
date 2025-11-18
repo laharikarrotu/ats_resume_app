@@ -30,6 +30,10 @@ Thumbs.db
 outputs/
 uploads/
 
+# Personal resume files (keep templates)
+*.docx
+!resume_templates/*.docx
+
 # Environment variables
 .env
 .env.local
