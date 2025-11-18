@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>{{ title or "ATS Resume Generator" }}</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <h1>ATS Resume Generator</h1>
+        <p>
+          Upload your resume and paste a job description to generate a
+          personalized, ATS‑optimized resume tailored to each job.
+        </p>
+      </header>
+
+      <main>
+        <!-- Resume Upload Section -->
+        <section class="card">
+          <h2>Step 1: Upload Your Resume (Optional)</h2>
+          <p class="hint">
+            Upload your resume (PDF or DOCX) for personalized generation.
+            If you skip this step, a basic resume with keywords will be generated.
+          </p>
+          <form id="uploadForm" class="form" enctype="multipart/form-data">
+            <label for="resume_file">Resume File (PDF or DOCX)</label>
+            <input
+              type="file"
+              id="resume_file"
+              name="file"
+              accept=".pdf,.docx,.doc"
+              aria-describedby="file-hint"
+            />
+            <p id="file-hint" class="hint" style="margin-top: 0;">
+              Maximum file size: 10MB. Supported formats: PDF, DOCX, DOC
+            </p>
+            <button type="submit" id="uploadButton">
+              <span id="uploadButtonText">Upload & Parse Resume</span>
+            </button>
+          </form>
+          <div id="uploadStatus" class="status-message" role="status" aria-live="polite" style="display: none;"></div>
+        </section>
+
+        <!-- Job Description Section -->
+        <section class="card">
+          <h2>Step 2: Paste Job Description</h2>
+          <form
+            id="generateForm"
+            action="/generate_resume/"
+            method="post"
+            class="form"
+          >
+            <input type="hidden" id="session_id" name="session_id" value="" />
+            
+            <label for="job_description">Job Description</label>
+            <textarea
+              id="job_description"
+              name="job_description"
+              rows="14"
+              required
+              placeholder="Paste the full job description here..."
+              aria-describedby="jd-hint"
+            ></textarea>
+            <p id="jd-hint" class="hint" style="margin-top: 0;">
+              Paste the complete job description including requirements, responsibilities, and qualifications.
+            </p>
+
+            <button type="submit" id="generateButton">
+              <span id="generateButtonText">Generate Personalized ATS Resume (DOCX)</span>
+            </button>
+          </form>
+          <p class="hint">
+            The generated file will download as
+            <strong>ATS_resume.docx</strong>.
+            <span id="personalizationHint" style="display: none; color: #10b981; font-weight: bold;">
+              ✓ Your resume is loaded - generation will be personalized!
+            </span>
+          </p>
+        </section>
+      </main>
+
+      <footer>
+        <p>
+          Powered by <strong>FastAPI</strong>,
+          <strong>OpenAI LLM</strong>, and
+          <strong>python‑docx</strong>.
+        </p>
+      </footer>
+    </div>
+
+    <script>
+      // Handle resume upload
+      document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const fileInput = document.getElementById('resume_file');
+        const statusDiv = document.getElementById('uploadStatus');
+        const sessionInput = document.getElementById('session_id');
+        const hintSpan = document.getElementById('personalizationHint');
+        const uploadButton = document.getElementById('uploadButton');
+        const uploadButtonText = document.getElementById('uploadButtonText');
+        
+        if (!fileInput.files || !fileInput.files[0]) {
+          statusDiv.textContent = 'Please select a file first.';
+          statusDiv.style.display = 'block';
+          statusDiv.style.color = '#ef4444';
+          return;
+        }
+        
+        // Validate file size (10MB limit)
+        const file = fileInput.files[0];
+        const maxSize = 10 * 1024 * 1024; // 10MB
+        if (file.size > maxSize) {
+          statusDiv.textContent = 'File size exceeds 10MB limit. Please upload a smaller file.';
+          statusDiv.style.display = 'block';
+          statusDiv.style.color = '#ef4444';
+          return;
+        }
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        // Show loading state
+        uploadButton.disabled = true;
+        uploadButtonText.innerHTML = '<span class="loading"></span> Uploading...';
+        statusDiv.textContent = 'Uploading and parsing resume...';
+        statusDiv.style.display = 'block';
+        statusDiv.style.color = '#3b82f6';
+        
+        try {
+          const response = await fetch('/upload_resume/', {
+            method: 'POST',
+            body: formData
+          });
+          
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Upload failed');
+          }
+          
+          const data = await response.json();
+          
+          // Store session ID
+          sessionInput.value = data.session_id;
+          
+          // Update UI
+          statusDiv.textContent = `✓ Resume parsed successfully! Found: ${data.experience_count} experiences, ${data.projects_count} projects.`;
+          statusDiv.style.color = '#10b981';
+          hintSpan.style.display = 'inline';
+          
+          // Reset button
+          uploadButton.disabled = false;
+          uploadButtonText.textContent = 'Upload & Parse Resume';
+          
+          // Clear file input
+          fileInput.value = '';
+          
+        } catch (error) {
+          statusDiv.textContent = `Error: ${error.message}`;
+          statusDiv.style.color = '#ef4444';
+          uploadButton.disabled = false;
+          uploadButtonText.textContent = 'Upload & Parse Resume';
+        }
+      });
+      
+      // Handle generation form submission
+      document.getElementById('generateForm').addEventListener('submit', function(e) {
+        const generateButton = document.getElementById('generateButton');
+        const generateButtonText = document.getElementById('generateButtonText');
+        
+        // Show loading state
+        generateButton.disabled = true;
+        generateButtonText.innerHTML = '<span class="loading"></span> Generating...';
+        
+        // Re-enable after a delay (in case of error, form will reset)
+        setTimeout(() => {
+          generateButton.disabled = false;
+          generateButtonText.textContent = 'Generate Personalized ATS Resume (DOCX)';
+        }, 30000); // 30 second timeout
+      });
+    </script>
+  </body>
+</html>
