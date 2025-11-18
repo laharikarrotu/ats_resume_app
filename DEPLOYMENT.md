@@ -96,7 +96,7 @@ git push -u origin main
 
 3. **Configure:**
    - Railway auto-detects Python
-   - Add environment variable: `OPENAI_API_KEY`
+   - Add environment variable: `OPENAI_API_KEY` in Variables tab
 
 4. **Deploy:**
    - Railway automatically deploys on git push
@@ -105,25 +105,15 @@ git push -u origin main
 **Advantages:**
 - ✅ Free tier available ($5 credit/month)
 - ✅ Auto-deploys on git push
-- ✅ Supports long-running processes
+- ✅ Supports long-running processes (no timeout limits!)
 - ✅ Easy environment variable management
+- ✅ Full file system access
 - ✅ Built-in PostgreSQL (if needed later)
 
 **Railway Configuration:**
-Create `railway.json` (optional):
-```json
-{
-  "$schema": "https://railway.app/railway.schema.json",
-  "build": {
-    "builder": "NIXPACKS"
-  },
-  "deploy": {
-    "startCommand": "uvicorn src.main:app --host 0.0.0.0 --port $PORT",
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10
-  }
-}
-```
+✅ `railway.json` is already created and configured!
+
+**See [RAILWAY_SETUP.md](./RAILWAY_SETUP.md) for detailed step-by-step instructions.**
 
 ---
 

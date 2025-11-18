@@ -293,9 +293,12 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
 
 **Quick Deploy to Railway:**
 1. Push code to GitHub
-2. Connect Railway to your GitHub repo
-3. Add `OPENAI_API_KEY` environment variable
-4. Deploy automatically!
+2. Go to https://railway.app and sign up with GitHub
+3. Create new project → Deploy from GitHub repo
+4. Add `OPENAI_API_KEY` environment variable in Variables tab
+5. Railway auto-deploys! Get your URL from Settings → Domains
+
+**📚 See [RAILWAY_SETUP.md](./RAILWAY_SETUP.md) for detailed instructions.**
 
 ---
 
