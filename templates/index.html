@@ -2,8 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title or "ATS Resume Generator" }}</title>
+    <!-- Preload critical CSS for faster LCP -->
+    <link rel="preload" href="/static/styles.css" as="style" />
     <link rel="stylesheet" href="/static/styles.css" />
+    <!-- Inline critical CSS for above-the-fold content -->
+    <style>
+      *,*::before,*::after{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f172a;color:#e5e7eb}.page{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:2rem 1rem 3rem}.hero{text-align:center;margin-bottom:2rem}.hero h1{margin:0 0 0.5rem;font-size:2.25rem}.hero p{margin:0;color:#9ca3af}main{width:100%;max-width:800px}.card{background:#020617;border-radius:1rem;padding:1.75rem 1.5rem 1.5rem;box-shadow:0 24px 80px rgba(15,23,42,0.8);border:1px solid rgba(148,163,184,0.3)}.card h2{margin-top:0;font-size:1.25rem}
+    </style>
   </head>
   <body>
     <div class="page">
@@ -120,8 +127,9 @@
       </footer>
     </div>
 
-    <script>
+    <script defer>
       // Handle resume upload
+      document.addEventListener('DOMContentLoaded', function() {
       document.getElementById('uploadForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         
@@ -215,6 +223,7 @@
           generateButtonText.textContent = 'Generate Personalized ATS Resume';
         }, 30000); // 30 second timeout
       });
+      }); // DOMContentLoaded
     </script>
   </body>
 </html>

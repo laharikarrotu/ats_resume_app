@@ -7,6 +7,7 @@ from fastapi import FastAPI, Form, Request, UploadFile, File, HTTPException, Que
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.gzip import GZipMiddleware
 
 from .resume_generator import generate_resume
 from .llm_client import extract_keywords
@@ -43,7 +44,19 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="ATS Resume Generator", version="0.1.0")
 
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# Add GZip compression for better performance
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Static files with cache headers for better performance
+class CachedStaticFiles(StaticFiles):
+    async def __call__(self, scope, receive, send):
+        response = await super().__call__(scope, receive, send)
+        if hasattr(response, 'headers'):
+            # Cache static files for 1 year (immutable)
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+app.mount("/static", CachedStaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # In-memory storage for parsed resume data (session-based)
