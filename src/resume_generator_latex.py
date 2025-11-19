@@ -182,7 +182,9 @@ def _build_latex_content(
 def _replace_section(content: str, section_name: str, replacement: str) -> str:
     """Replace a section in LaTeX content."""
     # Find section pattern: \textbf{SECTION_NAME} ... until next \textbf{_} or end
-    pattern = rf'\\textbf\{{{re.escape(section_name)}}\}}.*?(?=\\textbf\{{|\\end\{{document\}})'
+    # Escape braces properly in f-string by doubling them
+    escaped_section = re.escape(section_name)
+    pattern = rf'\\textbf\{{{escaped_section}\}}.*?(?=\\textbf\{{|\\end\{{document\}})'
     
     # Create replacement with section header
     new_section = f'\\textbf{{{section_name}}}\n\n{replacement}\n'
