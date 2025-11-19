@@ -43,4 +43,8 @@ uploads/
 .vercel
 .railway
 
+# Documentation (keep README.md, ignore all other markdown files)
+*.md
+!README.md
+
 
