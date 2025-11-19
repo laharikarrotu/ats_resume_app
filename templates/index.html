@@ -80,6 +80,21 @@
               <strong>PDF:</strong> Uses LaTeX template for exact format matching (requires LaTeX installation).
             </p>
 
+            <label for="fast_mode" style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+              <input
+                type="checkbox"
+                id="fast_mode"
+                name="fast_mode"
+                value="true"
+                style="width: auto; margin: 0;"
+              />
+              <span><strong>Fast Mode</strong> (1-2 seconds, skips LLM rewriting, just injects keywords)</span>
+            </label>
+            <p class="hint" style="margin-top: 0.5rem;">
+              <strong>Fast Mode:</strong> Ultra-fast generation (1-2s) - skips content rewriting, just injects keywords. 
+              <strong>Standard Mode:</strong> Quality generation (2-5s) - full LLM rewriting with smart skipping.
+            </p>
+
             <button type="submit" id="generateButton" style="margin-top: 1rem;">
               <span id="generateButtonText">Generate Personalized ATS Resume</span>
             </button>

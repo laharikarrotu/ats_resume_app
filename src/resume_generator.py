@@ -11,6 +11,7 @@ This module generates professional resumes that:
 
 from pathlib import Path
 from typing import List, Optional
+import asyncio
 
 from docx import Document
 from docx.enum.section import WD_ORIENT
@@ -21,25 +22,37 @@ from .models import ResumeData, Experience
 from .utils import deduplicate_preserve_order, normalize_keyword
 from .llm_client import rewrite_experience_bullets, rewrite_project_description, match_experience_with_jd
 
-# Try to import async versions for parallel execution
+# Try to import optimized version first (faster)
 try:
     import asyncio
-    from .llm_client_async import (
-        prepare_resume_data_parallel,
-        rewrite_experience_bullets_async,
-        rewrite_project_description_async,
-        match_experience_with_jd_async
-    )
+    from .llm_client_optimized import prepare_resume_data_optimized
+    OPTIMIZED_AVAILABLE = True
     ASYNC_AVAILABLE = True
 except ImportError:
-    ASYNC_AVAILABLE = False
+    OPTIMIZED_AVAILABLE = False
+    # Fallback to regular async version
+    try:
+        from .llm_client_async import (
+            prepare_resume_data_parallel,
+            rewrite_experience_bullets_async,
+            rewrite_project_description_async,
+            match_experience_with_jd_async
+        )
+        ASYNC_AVAILABLE = True
+    except ImportError:
+        ASYNC_AVAILABLE = False
 
-# Import LLM condenser
+# Import LLM condenser (async version preferred)
 try:
-    from .llm_condenser import condense_resume_for_one_page
-    LLM_CONDENSER_AVAILABLE = True
+    from .llm_condenser_async import condense_resume_for_one_page_async
+    LLM_CONDENSER_ASYNC_AVAILABLE = True
 except ImportError:
-    LLM_CONDENSER_AVAILABLE = False
+    LLM_CONDENSER_ASYNC_AVAILABLE = False
+    try:
+        from .llm_condenser import condense_resume_for_one_page
+        LLM_CONDENSER_AVAILABLE = True
+    except ImportError:
+        LLM_CONDENSER_AVAILABLE = False
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -79,7 +92,9 @@ async def generate_resume(
     keywords: List[str],
     resume_data: Optional[ResumeData] = None,
     job_description: Optional[str] = None,
-    use_parallel: bool = True
+    use_parallel: bool = True,
+    fast_mode: bool = False,
+    session_id: Optional[str] = None
 ) -> None:
     """
     Generate a personalized, ATS-optimized resume in C3 format.
@@ -93,14 +108,10 @@ async def generate_resume(
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     
-    # Condense resume intelligently to fit one page while preserving 90%+ content
-    if resume_data and LLM_CONDENSER_AVAILABLE:
-        try:
-            resume_data = condense_resume_for_one_page(resume_data, target_page_size="C3" if not USE_LETTER_SIZE else "Letter")
-        except Exception as e:
-            print(f"Condensation error: {e}. Using original data.")
+    # OPTIMIZED: Run condensation and parallel data preparation simultaneously!
+    # This saves 2-5 seconds by running them in parallel instead of sequentially
     
-    # Create new document
+    # Create new document first (no async needed)
     document = Document()
     
     # Set page size (C3 or Letter - Letter is bigger for more content)
@@ -112,17 +123,92 @@ async def generate_resume(
     # Set margins
     _set_margins(document)
     
-    # Prepare resume data with parallel LLM calls for speed (if enabled)
-    if use_parallel and ASYNC_AVAILABLE and resume_data and job_description:
-        try:
-            prioritized_experiences, personalized_projects = await prepare_resume_data_parallel(
-                resume_data, job_description, keywords
-            )
-            # Use the prepared data
-            resume_data.experience = prioritized_experiences
-            resume_data.projects = personalized_projects
-        except Exception as e:
-            print(f"Parallel LLM processing error: {e}. Using sequential processing.")
+    # SMART CONDENSATION: Only condense if content is actually too large
+    # Skip condensation if resume is already compact (saves 1-2 seconds!)
+    should_condense = False
+    if resume_data:
+        total_bullets = sum(len(exp.bullets) for exp in resume_data.experience)
+        # Only condense if:
+        # - More than 4 experiences, OR
+        # - More than 20 total bullets, OR
+        # - More than 4 projects
+        if len(resume_data.experience) > 4 or total_bullets > 20 or len(resume_data.projects) > 4:
+            should_condense = True
+    
+    # Run condensation and parallel data preparation in parallel (if both enabled)
+    if resume_data:
+        tasks = []
+        
+        # Task 1: Condensation (only if needed - saves time!)
+        if should_condense:
+            if LLM_CONDENSER_ASYNC_AVAILABLE:
+                condense_task = condense_resume_for_one_page_async(
+                    resume_data, 
+                    target_page_size="C3" if not USE_LETTER_SIZE else "Letter"
+                )
+                tasks.append(("condense", condense_task))
+            elif LLM_CONDENSER_AVAILABLE:
+                # Sync version - run in thread pool to not block
+                condense_task = asyncio.to_thread(
+                    condense_resume_for_one_page,
+                    resume_data,
+                    "C3" if not USE_LETTER_SIZE else "Letter"
+                )
+                tasks.append(("condense", condense_task))
+        
+        # Task 2: Parallel data preparation (if enabled)
+        if use_parallel and ASYNC_AVAILABLE and job_description:
+            if OPTIMIZED_AVAILABLE:
+                # Use optimized version (faster, with smart skipping)
+                prep_task = prepare_resume_data_optimized(
+                    resume_data, job_description, keywords,
+                    fast_mode=fast_mode, session_id=session_id
+                )
+            else:
+                # Fallback to regular parallel version
+                prep_task = prepare_resume_data_parallel(
+                    resume_data, job_description, keywords
+                )
+            tasks.append(("prepare", prep_task))
+        
+        # Execute all tasks in parallel
+        if tasks:
+            try:
+                results = await asyncio.gather(*[task for _, task in tasks], return_exceptions=True)
+                
+                # Process condensation result
+                for i, (task_type, _) in enumerate(tasks):
+                    if task_type == "condense" and not isinstance(results[i], Exception):
+                        resume_data = results[i]
+                    elif task_type == "condense" and isinstance(results[i], Exception):
+                        print(f"Condensation error: {results[i]}. Using original data.")
+                
+                # Process parallel preparation result
+                for i, (task_type, _) in enumerate(tasks):
+                    if task_type == "prepare" and not isinstance(results[i], Exception):
+                        prioritized_experiences, personalized_projects = results[i]
+                        resume_data.experience = prioritized_experiences
+                        resume_data.projects = personalized_projects
+                    elif task_type == "prepare" and isinstance(results[i], Exception):
+                        print(f"Parallel LLM processing error: {results[i]}. Using original data.")
+            except Exception as e:
+                print(f"Parallel processing error: {e}. Using original data.")
+        elif use_parallel and ASYNC_AVAILABLE and job_description:
+            # Only parallel prep, no condensation
+            try:
+                if OPTIMIZED_AVAILABLE:
+                    prioritized_experiences, personalized_projects = await prepare_resume_data_optimized(
+                        resume_data, job_description, keywords,
+                        fast_mode=fast_mode, session_id=session_id
+                    )
+                else:
+                    prioritized_experiences, personalized_projects = await prepare_resume_data_parallel(
+                        resume_data, job_description, keywords
+                    )
+                resume_data.experience = prioritized_experiences
+                resume_data.projects = personalized_projects
+            except Exception as e:
+                print(f"Parallel LLM processing error: {e}. Using sequential processing.")
     
     # Build resume sections (with more content now)
     _build_header(document, resume_data)

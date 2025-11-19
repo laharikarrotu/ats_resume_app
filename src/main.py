@@ -12,6 +12,16 @@ from .resume_generator import generate_resume
 from .llm_client import extract_keywords
 from .llm_client_async import extract_keywords_async
 
+# Try to import optimized version (faster)
+try:
+    from .llm_client_optimized import (
+        extract_keywords_async_optimized,
+        prepare_resume_data_optimized
+    )
+    OPTIMIZED_AVAILABLE = True
+except ImportError:
+    OPTIMIZED_AVAILABLE = False
+
 # Try to import LaTeX generator
 try:
     from .resume_generator_latex import generate_resume_latex
@@ -106,16 +116,23 @@ async def upload_resume(file: UploadFile = File(...)):
 async def create_resume(
     job_description: str = Form(...),
     session_id: Optional[str] = Form(None),
-    output_format: str = Form("docx")  # "docx" or "pdf" (LaTeX)
+    output_format: str = Form("docx"),  # "docx" or "pdf" (LaTeX)
+    fast_mode: str = Form("false")  # "true" or "false" for fast mode
 ):
     """
     HTML form endpoint: returns a DOCX file directly.
     
     If session_id is provided, uses parsed resume data for personalized generation.
     Otherwise, generates a basic resume with keywords only.
+    
+    fast_mode: "true" for ultra-fast generation (1-2s), "false" for quality (2-5s)
     """
-    # Use async keyword extraction for faster generation
-    keywords = await extract_keywords_async(job_description)
+    # Use optimized keyword extraction with caching
+    use_fast_mode = fast_mode.lower() == "true"
+    if OPTIMIZED_AVAILABLE:
+        keywords = await extract_keywords_async_optimized(job_description, use_cache=True)
+    else:
+        keywords = await extract_keywords_async(job_description)
     
     # Get parsed resume data if session_id provided
     resume_data = None
@@ -148,7 +165,9 @@ async def create_resume(
             keywords,
             resume_data=resume_data,
             job_description=job_description,
-            use_parallel=True  # Enable parallel LLM calls for speed
+            use_parallel=True,  # Enable parallel LLM calls for speed
+            fast_mode=use_fast_mode,  # Fast mode option
+            session_id=session_id  # For caching
         )
     
     return FileResponse(
