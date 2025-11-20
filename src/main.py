@@ -158,19 +158,44 @@ async def create_resume(
     # Generate resume with personalized data if available
     # Use parallel LLM calls for faster generation
     if output_format.lower() == "pdf" and LATEX_AVAILABLE:
-        # Generate PDF using LaTeX
-        pdf_path = generate_resume_latex(
-            str(output_path).replace('.docx', '.pdf'),
-            keywords,
-            resume_data=resume_data,
-            job_description=job_description
-        )
-        filename = Path(pdf_path).name
-        return FileResponse(
-            pdf_path,
-            media_type="application/pdf",
-            filename=filename
-        )
+        # Generate PDF using LaTeX (run in thread pool to not block)
+        try:
+            import asyncio
+            pdf_path = await asyncio.to_thread(
+                generate_resume_latex,
+                str(output_path).replace('.docx', '.pdf'),
+                keywords,
+                resume_data,
+                job_description
+            )
+            filename = Path(pdf_path).name
+            return FileResponse(
+                pdf_path,
+                media_type="application/pdf",
+                filename=filename
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(
+                status_code=404,
+                detail=f"LaTeX template not found. Please ensure the template file exists. Error: {str(e)}"
+            )
+        except RuntimeError as e:
+            error_msg = str(e)
+            if "LaTeX not installed" in error_msg or "not found" in error_msg.lower():
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"LaTeX is not installed on the server. Please use DOCX format instead. Error: {error_msg}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"LaTeX compilation failed: {error_msg}"
+                )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error generating PDF: {str(e)}"
+            )
     else:
         # Generate DOCX (default)
         await generate_resume(
@@ -217,12 +242,37 @@ async def create_resume_api(
     if output_format.lower() == "pdf" and LATEX_AVAILABLE:
         filename = f"ATS_resume_{uuid4().hex[:8]}.pdf"
         output_path = OUTPUT_DIR / filename
-        pdf_path = generate_resume_latex(
-            str(output_path),
-            keywords,
-            resume_data=resume_data,
-            job_description=payload.job_description
-        )
+        try:
+            import asyncio
+            pdf_path = await asyncio.to_thread(
+                generate_resume_latex,
+                str(output_path),
+                keywords,
+                resume_data,
+                payload.job_description
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(
+                status_code=404,
+                detail=f"LaTeX template not found. Please ensure the template file exists. Error: {str(e)}"
+            )
+        except RuntimeError as e:
+            error_msg = str(e)
+            if "LaTeX not installed" in error_msg or "not found" in error_msg.lower():
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"LaTeX is not installed on the server. Please use DOCX format instead. Error: {error_msg}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"LaTeX compilation failed: {error_msg}"
+                )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error generating PDF: {str(e)}"
+            )
     else:
         filename = f"ATS_resume_{uuid4().hex[:8]}.docx"
         output_path = OUTPUT_DIR / filename

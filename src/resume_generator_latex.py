@@ -187,9 +187,13 @@ def _replace_section(content: str, section_name: str, replacement: str) -> str:
     pattern = rf'\\textbf\{{{escaped_section}\}}.*?(?=\\textbf\{{|\\end\{{document\}})'
     
     # Create replacement with section header
-    new_section = f'\\textbf{{{section_name}}}\n\n{replacement}\n'
+    # Use a lambda function to avoid escape sequence interpretation issues
+    # This prevents Python from interpreting \u, \n, etc. in the replacement string
+    def replacer(match):
+        # Return the replacement - backslashes are literal here
+        return '\\textbf{' + section_name + '}\n\n' + replacement + '\n'
     
-    content = re.sub(pattern, new_section, content, flags=re.DOTALL)
+    content = re.sub(pattern, replacer, content, flags=re.DOTALL)
     return content
 
 
