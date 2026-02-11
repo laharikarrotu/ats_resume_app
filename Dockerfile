@@ -28,15 +28,29 @@ RUN if [ "$INSTALL_LATEX" = "true" ]; then \
     && rm -rf /var/lib/apt/lists/*; \
     fi
 
+# Install Node.js for frontend build
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Build frontend first (for better layer caching)
+COPY frontend/package.json frontend/package-lock.json* frontend/
+RUN cd frontend && npm ci --include=dev
+
+COPY frontend/ frontend/
+RUN cd frontend && npm run build
+
 # Copy application code
-COPY . .
+COPY src/ src/
+COPY resume_templates/ resume_templates/
+COPY start.py Procfile railway.json ./
 
 # Create output directory
-RUN mkdir -p outputs
+RUN mkdir -p outputs uploads
 
 # Expose port
 EXPOSE 8000
@@ -45,5 +59,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run with uvicorn
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run with start.py (reads PORT from env for Railway)
+CMD ["python", "start.py"]

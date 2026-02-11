@@ -1,11 +1,11 @@
 [phases.setup]
-nixPkgs = ["...", "nodejs_20", "npm"]
+nixPkgs = ["...", "nodejs_20"]
 
 [phases.install]
 cmds = ["pip install -r requirements.txt", "cd frontend && npm ci --include=dev"]
 
 [phases.build]
-cmds = ["cd frontend && npm run build"]
+cmds = ["cd frontend && npm run build", "ls -la frontend/dist/"]
 
 [start]
 cmd = "python start.py"

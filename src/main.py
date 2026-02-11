@@ -153,6 +153,14 @@ async def on_startup():
         info["model"],
         info["fallback_model"] or "none",
     )
+
+    # Log frontend status
+    index_file = FRONTEND_DIST_DIR / "index.html"
+    if index_file.exists():
+        logger.info("✅ Frontend built — serving SPA from %s", FRONTEND_DIST_DIR)
+    else:
+        logger.warning("⚠️  Frontend NOT built — %s does not exist", index_file)
+
     if settings.debug:
         logger.info("⚠️  Debug mode ON — /docs enabled, CORS wide-open")
 
