@@ -1,250 +1,157 @@
-% Options for packages loaded elsewhere
-\PassOptionsToPackage{unicode}{hyperref}
-\PassOptionsToPackage{hyphens}{url}
-%
-\documentclass[
-]{article}
-\usepackage{amsmath,amssymb}
-\usepackage{lmodern}
-\usepackage{iftex}
-\ifPDFTeX
-  \usepackage[T1]{fontenc}
-  \usepackage[utf8]{inputenc}
-  \usepackage{textcomp} % provide euro and other symbols
-\else % if luatex or xetex
-  \usepackage{unicode-math}
-  \defaultfontfeatures{Scale=MatchLowercase}
-  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
-\fi
-% Use upquote if available, for straight quotes in verbatim environments
-\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
-\IfFileExists{microtype.sty}{% use microtype if available
-  \usepackage[]{microtype}
-  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
-}{}
-\makeatletter
-\@ifundefined{KOMAClassName}{% if non-KOMA class
-  \IfFileExists{parskip.sty}{%
-    \usepackage{parskip}
-  }{% else
-    \setlength{\parindent}{0pt}
-    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
-}{% if KOMA class
-  \KOMAoptions{parskip=half}}
-\makeatother
+%% ═══════════════════════════════════════════════════════════════
+%% ATS-Optimized Resume Template
+%% Format : US Letter | Helvetica/Calibri | 10pt | One-page
+%% Order  : Header → Experience → Projects → Education
+%%           → Technical Skills → Certifications
+%% ═══════════════════════════════════════════════════════════════
+
+\documentclass[10pt,letterpaper]{article}
+
+%% ── Packages ──────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{helvet}                       % Helvetica (ATS-safe, closest to Calibri)
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage[letterpaper, margin=0.5in, top=0.4in, bottom=0.4in]{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
 \usepackage{xcolor}
-\setlength{\emergencystretch}{3em} % prevent overfull lines
-\providecommand{\tightlist}{%
-  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
-\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
-\ifLuaTeX
-  \usepackage{selnolig}  % disable illegal ligatures
-\fi
-\IfFileExists{bookmark.sty}{\usepackage{bookmark}}{\usepackage{hyperref}}
-\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
-\urlstyle{same} % disable monospaced font for URLs
+
+%% ── Page style (no page numbers for 1-page) ──────────────────
+\pagestyle{empty}
+
+%% ── Colors ────────────────────────────────────────────────────
+\definecolor{linkblue}{HTML}{0563BB}
+\definecolor{ruleline}{HTML}{333333}
+
+%% ── Hyperlinks ────────────────────────────────────────────────
 \hypersetup{
-  hidelinks,
-  pdfcreator={LaTeX via pandoc}}
+    colorlinks=true,
+    urlcolor=linkblue,
+    linkcolor=linkblue,
+    pdfborder={0 0 0}
+}
 
-\author{}
-\date{}
+%% ── Section headings: UPPERCASE + rule ────────────────────────
+\titleformat{\section}
+    {\vspace{-6pt}\large\bfseries\scshape}
+    {}
+    {0em}
+    {}
+    [\vspace{-6pt}\color{ruleline}\titlerule\vspace{-4pt}]
+\titlespacing{\section}{0pt}{8pt}{4pt}
 
+%% ── Compact bullet lists ──────────────────────────────────────
+\setlist[itemize]{
+    leftmargin=0.15in,
+    topsep=1pt,
+    parsep=0pt,
+    partopsep=0pt,
+    itemsep=1pt,
+    label=\textbullet
+}
+
+%% ── Spacing ───────────────────────────────────────────────────
+\setlength{\parskip}{0pt}
+\setlength{\parindent}{0pt}
+\setlength{\tabcolsep}{0pt}
+
+%% ── Custom commands ───────────────────────────────────────────
+%  \experienceentry{Title}{Company}{Dates}{Location}
+%  \projectentry{Name}{Technologies}{URL}
+%  \educationentry{Degree}{University, Location}{Dates}{GPA}{Coursework}
+
+\newcommand{\experienceentry}[4]{%
+    \textbf{#1} \hfill \textbf{#3}\\
+    \textit{#2} \hfill \textit{#4}%
+}
+
+\newcommand{\projectentry}[3]{%
+    \textbf{#1}%
+    \ifx&#2&\else{ \textbar{} \textit{#2}}\fi%
+    \ifx&#3&\else{ \hfill \href{#3}{Link}}\fi%
+}
+
+\newcommand{\educationentry}[5]{%
+    \textbf{#1} \hfill \textbf{#3}\\
+    \textit{#2}%
+    \ifx&#4&\else{ \textbar{} GPA: #4}\fi%
+    \ifx&#5&\else{\\Relevant Coursework: #5}\fi%
+}
+
+
+%% ═════════════════════════════════════════════════════════════
 \begin{document}
 
-\textbf{LAHARI KARROTU}
+%% ── HEADER ───────────────────────────────────────────────────
+\begin{center}
+    {\LARGE\bfseries FIRSTNAME LASTNAME}\\[3pt]
+    {\small
+        City, State
+        \enspace\textbar\enspace
+        \href{mailto:email@example.com}{email@example.com}
+        \enspace\textbar\enspace
+        (555) 123-4567
+        \enspace\textbar\enspace
+        \href{https://linkedin.com/in/profile}{LinkedIn}
+        \enspace\textbar\enspace
+        \href{https://github.com/username}{GitHub}
+    }
+\end{center}
 
-\url{laharikarrotu24@gmail.com}
+\vspace{-2pt}
 
-+1 (321) 234-6914
+%% ── EXPERIENCE ───────────────────────────────────────────────
+\section{Experience}
 
-\url{linkedin.com/in/lahari-karrotu} \textbar{}
-\url{github.com/lahari-karrotu}
-
-Miami, FL
-
-\textbf{\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_}
-
-\textbf{EDUCATION}
-
-Master\textquotesingle s in Computer Science, Florida Institute of
-Technology
-
-GPA: 3.5/4.0 \textbar{} 2022 -- 2024
-
-Bachelor\textquotesingle s in Computer Science, KL University, India
-
-GPA: 8.9/10 \textbar{} 2018 -- 2022
-
-\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
-
-\textbf{TECHNICAL SKILLS}
-
-\textbf{Programming Languages:} Python, SQL, PySpark, JavaScript,
-TypeScript, Java.
-
-\textbf{AI/ML \& LLMs:} TensorFlow, PyTorch, Hugging Face, LangChain,
-OpenAI API, Anthropic Claude, Vector DBs (Pinecone, Weaviate), RAG,
-LLMs, Computer Vision, NLP .
-
-\textbf{Cloud Platforms:} AWS (SageMaker, Lambda, Glue, EMR, Redshift,
-S3, EC2, IAM), Azure (Data Factory, Synapse, Cognitive Services), GCP
-(Vertex AI, BigQuery, Cloud Functions).
-
-\textbf{Data Engineering:} Apache Spark, Databricks, Kafka, Airflow,
-ETL/ELT, Snowflake, Delta Lake, Apache Beam, dbt, Great Expectations,
-Apache Iceberg
-
-\textbf{DevOps \& MLOps:} Docker, Kubernetes, Terraform, CI/CD (GitHub
-Actions, Jenkins), MLflow, Kubeflow, Prometheus, Grafana, ELK Stack,
-GitOps
-
-\textbf{Databases \& Storage:} PostgreSQL, MongoDB, Redis,
-Elasticsearch, Cassandra, DynamoDB, Neo4j, InfluxDB, TimescaleD
-
-\textbf{Frameworks \& APIs:} FastAPI, Django, Flask, React, Next.js,
-Node.js, Express.js, Spring Boot, Apache Kafka,Apache Pulsar
-
-\textbf{Monitoring \& Analytics:} DataDog, New Relic, Splunk, Apache
-Airflow, Apache Superset, Tableau, Power BI, Grafana, Prometheus
-
-\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
-
-\textbf{WORK EXPERIENCE}
-
-\textbf{Full Stack AI Engineer - Arkatech Solutions}
-
-\textbf{May 2025 -- Present}
-
-• Architected and deployed enterprise AI/data platforms on Azure,
-supporting over 10,000+ users and processing 50TB+ data daily
-
-• Led a team of 3 engineers, automated infrastructure with Terraform,
-and built MLOps pipelines with MLflow, reducing deployment time by 60\%
-
-• Designed high-performance ETL workflows using Databricks, Snowflake,
-and ADF, improving data processing speed by 40\%
-
-• Implemented real-time AI inference systems with 99.9\% uptime,
-generating \$2M+ in cost savings through
-
-automated decision-making
-
-\textbf{Big Data Engineer Intern - Cognizant}
-
-\textbf{Jan 2022 -- Aug 2022}
-
-• Built enterprise ETL/ELT pipelines with AWS Glue, Redshift, and Spark
-for 5TB+ data, serving 15+ client projects simultaneously
-
-• Implemented real-time streaming pipelines with Kafka + Lambda,
-reducing manual data processing effort by 30\% and saving \$500K
-annually
-
-• Optimized Spark jobs and Redshift queries, improving query performance
-by 45\% and reducing infrastructure costs by 25\%
-
-• Collaborated with cross-functional teams of 8+ members to deliver data
-solutions for Fortune 500 clients
-
-\textbf{Data Analyst Intern - EPAM Systems}
-
-\textbf{Dec 2020 -- Mar 2021}
-
-• Automated PySpark workflows on AWS EMR with Airflow orchestration,
-processing 2TB+ data weekly for 10+ business units
-
-• Identified and fixed 500+ data anomalies using advanced statistical
-methods, improving production data reliability by 95\%
-
-• Created interactive Tableau dashboards and Power BI reports, enabling
-data-driven decisions for C-level executives
-
-• Reduced manual reporting time by 80\% through automation, saving 40+
-hours weekly across the analytics team
-
-\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
-
-\textbf{PROJECTS}
-
-\textbf{Predictive Maintenance (Manufacturing / Data Engineering)
-(Professional)}
-
+\experienceentry{Software Engineer}{Company Name}{May 2025 -- Present}{San Francisco, CA}
 \begin{itemize}
-\item
-  Technologies: Spark, Snowflake, Azure Data Lake, LSTM, XGBoost, AWS
-  Lambda, React, DockerArchitected enterprise-grade predictive
-  maintenance system processing100GB+ daily sensor data.
-\item
-  Built Spark ETL pipelines with Snowflake \& Azure Data Lake, trained
-  LSTM/XGBoost models on NASA datasets achieving 95\% accuracy.
-\item
-  Deployed real-time inference with AWS Lambda + React frontend,
-  reducing equipment downtime by 30\% and saving \$1.2M annually
+    \item Built REST API endpoints using Java Spring Boot processing HL7/FHIR messages for credential verification.
+    \item Debugged production issue---improved success rate from 87\% to 98\%. Reduced verification turnaround from 48h to 4h.
+    \item Optimized Oracle Database query: execution time dropped from 6 seconds to 2 seconds using composite index.
 \end{itemize}
 
-\textbf{SmartBuy AI Agent (E-Commerce / Full Stack) (Professional)}
+\vspace{2pt}
 
+\experienceentry{Software Engineer Intern}{Another Company}{Jun 2024 -- May 2025}{Remote}
 \begin{itemize}
-\item
-  Technologies: React, TypeScript, Gemini, Vercel, CI/CD, PostgreSQL,
-  Redis.
-\item
-  Built a scalable e-commerce platform with 50,000+ products and a
-  Gemini-powered voice assistant.
-\item
-  Implemented a microservices architecture with React + TypeScript,
-  integrated an advanced recommendation engine, and real-time cart
-  management.
-\item
-  Established CI/CD pipelines on Vercel, increased user engagement by
-  25\% and conversion rates by 18\% with personalized AI features.
+    \item Built event-driven microservices for visually impaired users---integrated Speech-to-Text + wake-word detection.
+    \item Reduced API response time 3s to 800ms using Redis caching (65\% hit rate). Implemented JWT auth with RBAC.
 \end{itemize}
 
-\textbf{Blinds \& Boundaries (Computer Vision / Azure) (Professional)}
+%% ── PROJECTS ─────────────────────────────────────────────────
+\section{Projects}
 
+\projectentry{Project Name}{FastAPI, React, PostgreSQL}{https://project-url.com}
 \begin{itemize}
-\item
-  Technologies: FastAPI, Azure Storage, App Service, Key Vault, CDN,
-  OpenCV, TensorFlow.
-\item
-  Developed a production-ready virtual blinds try-on application with
-  99.5\% accuracy.
-\item
-  Built a FastAPI backend with Azure infrastructure, and implemented
-  real-time computer vision using OpenCV and TensorFlow.
-\item
-  Deployed via Azure Storage, App Service, Key Vault, and CDN, boosting
-  customer conversions by 35\% and reducing. return rates by 20\%
+    \item Built full-stack application with 3-engine AI system processing medical documents with drug interaction checking.
+    \item Deployed on Vercel with FastAPI + PostgreSQL + Redis + Celery, implementing PII redaction + audit logging.
 \end{itemize}
 
-\textbf{Twitter Sentiment Analytics (Social Media / NLP) (Professional)}
+%% ── EDUCATION ────────────────────────────────────────────────
+\section{Education}
 
-\begin{itemize}
-\item
-  Technologies: Spark Streaming, Kafka, Python, NLP, BERT,
-  Elasticsearch, Grafana.
-\item
-  Built a real-time sentiment analysis platform processing 1M+ tweets
-  daily using Spark Streaming + Kafka.
-\item
-  Implemented BERT-based NLP models with 92\% accuracy; created
-  interactive dashboards with Elasticsearch and Grafana.
-\item
-  Provided actionable insights for 20+ brands, improving social media
-  strategies by 40\%.
-\end{itemize}
+\educationentry{Master's in Computer Science}{Florida Institute of Technology, Melbourne, FL}{2024}{}
+    {Machine Learning, Database Systems, Cloud Computing, Software Engineering, Algorithms}
 
-\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+\vspace{2pt}
 
-\textbf{CERTIFICATIONS}
+\educationentry{Bachelor's in Computer Science}{KL University, India}{2022}{}{}
 
-\href{https://www.credly.com/badges/454b6f57-2586-48bd-a854-1317ee4a6fdd/public_url}{AWS
-Certified Solutions Architect -- Associate (2025)}
+%% ── TECHNICAL SKILLS ─────────────────────────────────────────
+\section{Technical Skills}
 
-\href{https://www.youracclaim.com/badges/09bfbaf8-6538-4b48-a9ea-49b9bc39414a?source=linked_in_profile}{Cisco
-Certified Network Associate (CCNA) (2023)}
+\textbf{Languages:} Python, Java, JavaScript, TypeScript, SQL\\
+\textbf{Backend:} FastAPI, Spring Boot, Node.js, REST APIs\\
+\textbf{Frontend:} React, Redux, HTML/CSS, Tailwind CSS\\
+\textbf{Cloud:} Oracle Cloud (OCI), Azure, AWS (Lambda, S3)\\
+\textbf{Databases:} Oracle Database, PostgreSQL, Redis\\
+\textbf{Tools:} Git, Jenkins, Docker, Jest, Liquibase
 
-Oracle Database SQL Certified Associate (2023)
+%% ── CERTIFICATIONS ───────────────────────────────────────────
+\section{Certifications}
+
+\textbf{AWS Certified Solutions Architect -- Associate} \hfill 2024
 
 \end{document}

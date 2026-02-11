@@ -18,21 +18,20 @@ from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt, Inches
 
-from .models import ResumeData, Experience
-from .utils import deduplicate_preserve_order, normalize_keyword
-from .llm_client import rewrite_experience_bullets, rewrite_project_description, match_experience_with_jd
+from ..models import ResumeData, Experience
+from ..utils import deduplicate_preserve_order, normalize_keyword
+from ..llm.client import rewrite_experience_bullets, rewrite_project_description, match_experience_with_jd
 
 # Try to import optimized version first (faster)
 try:
-    import asyncio
-    from .llm_client_optimized import prepare_resume_data_optimized
+    from ..llm.client_optimized import prepare_resume_data_optimized
     OPTIMIZED_AVAILABLE = True
     ASYNC_AVAILABLE = True
 except ImportError:
     OPTIMIZED_AVAILABLE = False
     # Fallback to regular async version
     try:
-        from .llm_client_async import (
+        from ..llm.client_async import (
             prepare_resume_data_parallel,
             rewrite_experience_bullets_async,
             rewrite_project_description_async,
@@ -43,20 +42,21 @@ except ImportError:
         ASYNC_AVAILABLE = False
 
 # Import LLM condenser (async version preferred)
+LLM_CONDENSER_ASYNC_AVAILABLE = False
+LLM_CONDENSER_AVAILABLE = False
 try:
-    from .llm_condenser_async import condense_resume_for_one_page_async
+    from ..llm.condenser_async import condense_resume_for_one_page_async
     LLM_CONDENSER_ASYNC_AVAILABLE = True
 except ImportError:
-    LLM_CONDENSER_ASYNC_AVAILABLE = False
     try:
-        from .llm_condenser import condense_resume_for_one_page
+        from ..llm.condenser import condense_resume_for_one_page
         LLM_CONDENSER_AVAILABLE = True
     except ImportError:
-        LLM_CONDENSER_AVAILABLE = False
+        pass
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-TEMPLATE_PATH = BASE_DIR / "resume_templates" / "c3_template.docx"
+from ..config import BASE_DIR, RESUME_TEMPLATES_DIR
+TEMPLATE_PATH = RESUME_TEMPLATES_DIR / "c3_template.docx"
 
 # C3 Page Size: 7.17" x 10.51" (324mm x 458mm)
 # For better fit, we can use Letter size (8.5" x 11") which is bigger
@@ -677,5 +677,5 @@ def _enforce_one_page_smart(document: Document) -> None:
         # Reduce body font size slightly (only if really needed)
         for para in document.paragraphs[5:]:  # Skip header
             for run in para.runs:
-                if run.font.size and run.font.size.pt > Pt(9):
+                if run.font.size and run.font.size > Pt(9):
                     run.font.size = Pt(9)  # Slight reduction

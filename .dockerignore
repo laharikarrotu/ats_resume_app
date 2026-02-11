@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.eggs
+dist
+build
+.venv
+venv
+env
+
+# IDE
+.vscode
+.idea
+.cursor
+*.swp
+*.swo
+
+# Environment (secrets!)
+.env
+
+# Output (generated files)
+output/*.docx
+output/*.pdf
+output/*.tex
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Docs
+*.md
+LICENSE

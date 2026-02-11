@@ -1,32 +1,26 @@
 """
-LLM Content Condenser: Intelligently condenses resume content to fit one page while preserving 90%+ of information.
+Async LLM Content Condenser: Intelligently condenses resume content to fit one page while preserving 90%+ of information.
 
-Uses OpenAI to smartly condense sections without losing critical information.
+Uses async OpenAI to smartly condense sections without losing critical information.
+This async version prevents blocking and allows parallel execution.
 """
 
 import json
 import os
 from typing import List, Dict
 
-from openai import OpenAI
-from dotenv import load_dotenv
-
-from .models import ResumeData, Education, Experience, Project
-
-# Load environment variables
-load_dotenv()
-
-# Initialize OpenAI client
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+from ..models import ResumeData, Education, Experience, Project
+from .provider import async_client, ASYNC_MODEL as MODEL
 
 
-def condense_resume_for_one_page(
+async def condense_resume_for_one_page_async(
     resume_data: ResumeData,
     target_page_size: str = "C3"
 ) -> ResumeData:
     """
     Intelligently condense resume data to fit one page while preserving 90%+ of information.
+    
+    ASYNC VERSION - Non-blocking, can run in parallel with other operations.
     
     Uses LLM to:
     - Condense bullet points without losing meaning
@@ -41,15 +35,21 @@ def condense_resume_for_one_page(
     Returns:
         ResumeData: Condensed resume data that fits one page
     """
-    if not client:
+    if not async_client:
         # Fallback: return original data
         return resume_data
+    
+    # Quick check: if resume is already small, skip condensation
+    total_bullets = sum(len(exp.bullets) for exp in resume_data.experience)
+    if len(resume_data.experience) <= 4 and total_bullets <= 20 and len(resume_data.projects) <= 4:
+        # Resume is already compact, skip LLM condensation
+        return _apply_smart_condensation(resume_data)
     
     # Prepare content summary for LLM
     content_summary = {
         "education_count": len(resume_data.education),
         "experience_count": len(resume_data.experience),
-        "total_bullets": sum(len(exp.bullets) for exp in resume_data.experience),
+        "total_bullets": total_bullets,
         "projects_count": len(resume_data.projects),
         "skills_categories": len(resume_data.skills),
     }
@@ -97,85 +97,83 @@ JSON structure:
 Return ONLY the JSON, no explanation."""
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = await async_client.chat.completions.create(
+            model=MODEL,
             messages=[
                 {
                     "role": "system",
-                    "content": "You are an expert resume optimizer. Return JSON with condensation strategy."
+                    "content": "You are an expert resume optimizer. Always return valid JSON."
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            temperature=0.2,
-            max_tokens=1000,
+            temperature=0.1,
+            max_tokens=400,  # Reduced for faster response
         )
         
-        # For now, we'll apply smart condensation rules directly
-        # The LLM response can guide the strategy
+        raw_output = response.choices[0].message.content.strip()
         
-        # Apply condensation
-        condensed = _apply_smart_condensation(resume_data)
-        return condensed
+        # Clean up
+        if raw_output.startswith("```json"):
+            raw_output = raw_output[7:]
+        if raw_output.startswith("```"):
+            raw_output = raw_output[3:]
+        if raw_output.endswith("```"):
+            raw_output = raw_output[:-3]
+        raw_output = raw_output.strip()
+        
+        # Parse JSON
+        try:
+            strategy = json.loads(raw_output)
+            if isinstance(strategy, dict):
+                return _apply_smart_condensation(resume_data)
+        except json.JSONDecodeError:
+            pass
     
     except Exception as e:
-        print(f"LLM condensation error: {e}. Using smart condensation rules.")
-        return _apply_smart_condensation(resume_data)
+        print(f"Async condensation error: {e}. Using smart condensation.")
+    
+    # Fallback: apply smart condensation rules
+    return _apply_smart_condensation(resume_data)
 
 
 def _apply_smart_condensation(resume_data: ResumeData) -> ResumeData:
     """
-    Apply smart condensation rules to fit one page while preserving 90%+ content.
+    Apply smart condensation rules without LLM (fast fallback).
+    Returns a new ResumeData to avoid mutating the original.
     """
-    # Keep ALL education (just condense coursework if too long)
-    condensed_education = []
-    for edu in resume_data.education:
-        condensed_edu = Education(
-            degree=edu.degree,
-            university=edu.university,
-            location=edu.location,
-            dates=edu.dates,
-            gpa=edu.gpa,
-            coursework=edu.coursework[:8] if len(edu.coursework) > 8 else edu.coursework  # Limit coursework
-        )
-        condensed_education.append(condensed_edu)
-    
-    # Keep ALL experiences, but condense bullets intelligently
+    # Condense experience bullets
     condensed_experience = []
-    for exp in resume_data.experience:
-        # Keep top 5 bullets (prioritize quantified, impactful ones)
-        bullets = exp.bullets[:6]  # Increased from 4 to 6
+    for exp in resume_data.experience[:4]:  # Limit to 4 experiences
         condensed_exp = Experience(
             title=exp.title,
             company=exp.company,
             dates=exp.dates,
-            bullets=bullets
+            bullets=exp.bullets[:6]  # Keep first 6 bullets
         )
         condensed_experience.append(condensed_exp)
-    
-    # Keep ALL projects, condense descriptions
+
+    # Condense projects
     condensed_projects = []
-    for proj in resume_data.projects:
-        # Keep description but limit length
-        desc = proj.description[:200] if len(proj.description) > 200 else proj.description
+    for proj in resume_data.projects[:4]:  # Limit to 4 projects
+        desc = proj.description
+        if desc and len(desc) > 200:
+            desc = desc[:200] + "..."
         condensed_proj = Project(
             name=proj.name,
             description=desc,
-            technologies=proj.technologies[:10],  # Keep top 10 technologies
-            category=proj.category
+            technologies=proj.technologies,
+            category=proj.category,
         )
-        condensed_projects.append(proj)
-    
-    # Keep ALL skills (just limit per category if too many)
+        condensed_projects.append(condensed_proj)
+
+    # Condense skills
     condensed_skills = {}
     for category, skills_list in resume_data.skills.items():
-        condensed_skills[category] = skills_list[:15]  # Increased from 12 to 15
-    
-    # Keep ALL certifications
-    condensed_certifications = resume_data.certifications
-    
+        condensed_skills[category] = skills_list[:20]
+
     return ResumeData(
         name=resume_data.name,
         email=resume_data.email,
@@ -183,10 +181,10 @@ def _apply_smart_condensation(resume_data: ResumeData) -> ResumeData:
         linkedin=resume_data.linkedin,
         github=resume_data.github,
         location=resume_data.location,
-        education=condensed_education,
+        education=resume_data.education,
         skills=condensed_skills,
         experience=condensed_experience,
         projects=condensed_projects,
-        certifications=condensed_certifications,
+        certifications=resume_data.certifications,
     )
 

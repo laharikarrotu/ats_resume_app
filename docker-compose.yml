@@ -1,0 +1,51 @@
+# ═══════════════════════════════════════════════════════════
+# ATS Resume App — Docker Compose
+# ═══════════════════════════════════════════════════════════
+# Usage:
+#   docker compose up              → DOCX only (fast, small image)
+#   docker compose up --build      → rebuild after code changes
+#   docker compose --profile pdf up → with PDF/LaTeX support
+# ═══════════════════════════════════════════════════════════
+
+services:
+  # ── Main app (DOCX only — fast, ~200MB image) ──
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_LATEX: "false"
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./output:/app/output
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── Full app with PDF support (larger image ~600MB) ──
+  app-pdf:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_LATEX: "true"
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./output:/app/output
+    restart: unless-stopped
+    profiles:
+      - pdf

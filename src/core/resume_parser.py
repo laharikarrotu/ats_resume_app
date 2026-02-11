@@ -18,7 +18,7 @@ from docx import Document
 import pdfplumber
 from pypdf import PdfReader
 
-from .models import (
+from ..models import (
     ResumeData,
     Education,
     Experience,
@@ -28,7 +28,7 @@ from .models import (
 
 # Try to import LLM parser, fallback if not available
 try:
-    from .llm_parser import parse_resume_with_llm
+    from ..llm.parser import parse_resume_with_llm
     LLM_PARSER_AVAILABLE = True
 except ImportError:
     LLM_PARSER_AVAILABLE = False
@@ -36,10 +36,10 @@ except ImportError:
 
 def parse_resume(file_path: str) -> ResumeData:
     """
-    Parse a resume file (PDF or DOCX) and extract structured data.
+    Parse a resume file (PDF, DOCX, or TXT) and extract structured data.
     
     Args:
-        file_path: Path to the resume file (PDF or DOCX)
+        file_path: Path to the resume file (PDF, DOCX, or TXT)
     
     Returns:
         ResumeData: Structured resume data
@@ -53,9 +53,31 @@ def parse_resume(file_path: str) -> ResumeData:
         text = _extract_text_from_pdf(file_path)
     elif path.suffix.lower() in ['.docx', '.doc']:
         text = _extract_text_from_docx(file_path)
+    elif path.suffix.lower() in ['.txt', '.text']:
+        text = _extract_text_from_txt(file_path)
     else:
-        raise ValueError(f"Unsupported file format: {path.suffix}. Only PDF and DOCX are supported.")
+        raise ValueError(f"Unsupported file format: {path.suffix}. Supported: PDF, DOCX, TXT.")
     
+    return _parse_text(text)
+
+
+def parse_resume_from_text(text: str) -> ResumeData:
+    """
+    Parse resume from raw text (pasted / typed by user).
+    
+    Args:
+        text: Raw resume text content
+    
+    Returns:
+        ResumeData: Structured resume data
+    """
+    if not text or not text.strip():
+        raise ValueError("Resume text is empty.")
+    return _parse_text(text.strip())
+
+
+def _parse_text(text: str) -> ResumeData:
+    """Route text through LLM parser (if available) or basic parser."""
     # Use LLM parser for high accuracy (>90%), fallback to basic parser
     if LLM_PARSER_AVAILABLE:
         try:
@@ -87,6 +109,12 @@ def _extract_text_from_pdf(file_path: str) -> str:
                 text_parts.append(text)
     
     return "\n".join(text_parts)
+
+
+def _extract_text_from_txt(file_path: str) -> str:
+    """Extract text from a plain-text (.txt) file."""
+    path = Path(file_path)
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def _extract_text_from_docx(file_path: str) -> str:

@@ -20,7 +20,7 @@ def _generate_key(*args, **kwargs) -> str:
     return hashlib.md5(key_data.encode()).hexdigest()
 
 
-def get(key: str) -> Optional[Any]:
+def cache_get(key: str) -> Optional[Any]:
     """Get a value from cache if it exists and hasn't expired."""
     if key not in _cache:
         return None
@@ -34,10 +34,18 @@ def get(key: str) -> Optional[Any]:
     return value
 
 
-def set(key: str, value: Any, ttl: timedelta = CACHE_TTL) -> None:
+# Keep backward-compatible alias (shadows builtin, but needed for existing imports)
+get = cache_get
+
+
+def cache_set(key: str, value: Any, ttl: timedelta = CACHE_TTL) -> None:
     """Set a value in cache with TTL."""
     expiry = datetime.now() + ttl
     _cache[key] = (value, expiry)
+
+
+# Keep backward-compatible alias (shadows builtin, but needed for existing imports)
+set = cache_set
 
 
 def clear() -> None:
