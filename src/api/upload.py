@@ -11,8 +11,10 @@ from fastapi import APIRouter, Form, UploadFile, File, HTTPException
 from ..config import UPLOAD_DIR, settings
 from ..exceptions import UnsupportedFileTypeError, FileParsingError, FileTooLargeError
 from ..logger import logger
+from ..metrics import metrics
 from ..core.resume_parser import parse_resume, parse_resume_from_text
-from .deps import resume_data_cache
+from ..db import save_session
+from .deps import save_resume_data
 
 router = APIRouter()
 
@@ -40,19 +42,38 @@ async def upload_resume(file: UploadFile = File(...)):
         with open(temp_file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        resume_data = parse_resume(str(temp_file_path))
-        resume_data_cache[session_id] = resume_data
+        with metrics.timer("resume_parse_seconds"):
+            resume_data = parse_resume(str(temp_file_path))
+        save_resume_data(session_id, resume_data)
         temp_file_path.unlink()
+        metrics.inc("resume_uploads_total", labels={"type": "file", "ext": file_ext})
+
+        exp_count = len(resume_data.experience)
+        proj_count = len(resume_data.projects)
+        skills_count = sum(len(v) for v in resume_data.skills.values())
+        certs_count = len(resume_data.certifications)
+
+        # Persist to Supabase (fire-and-forget)
+        save_session(
+            session_id=session_id,
+            resume_name=resume_data.name,
+            resume_email=resume_data.email,
+            experience_count=exp_count,
+            skills_count=skills_count,
+            projects_count=proj_count,
+            certifications_count=certs_count,
+            resume_data=resume_data.model_dump(),
+        )
 
         return {
             "session_id": session_id,
             "message": "Resume uploaded and parsed successfully",
             "name": resume_data.name,
             "email": resume_data.email,
-            "experience_count": len(resume_data.experience),
-            "projects_count": len(resume_data.projects),
-            "skills_count": sum(len(v) for v in resume_data.skills.values()),
-            "certifications_count": len(resume_data.certifications),
+            "experience_count": exp_count,
+            "projects_count": proj_count,
+            "skills_count": skills_count,
+            "certifications_count": certs_count,
         }
 
     except Exception as e:
@@ -71,18 +92,37 @@ async def upload_resume_text(resume_text: str = Form(...)):
     session_id = uuid4().hex[:16]
 
     try:
-        resume_data = parse_resume_from_text(resume_text)
-        resume_data_cache[session_id] = resume_data
+        with metrics.timer("resume_parse_seconds"):
+            resume_data = parse_resume_from_text(resume_text)
+        save_resume_data(session_id, resume_data)
+        metrics.inc("resume_uploads_total", labels={"type": "text", "ext": "txt"})
+
+        exp_count = len(resume_data.experience)
+        proj_count = len(resume_data.projects)
+        skills_count = sum(len(v) for v in resume_data.skills.values())
+        certs_count = len(resume_data.certifications)
+
+        # Persist to Supabase (fire-and-forget)
+        save_session(
+            session_id=session_id,
+            resume_name=resume_data.name,
+            resume_email=resume_data.email,
+            experience_count=exp_count,
+            skills_count=skills_count,
+            projects_count=proj_count,
+            certifications_count=certs_count,
+            resume_data=resume_data.model_dump(),
+        )
 
         return {
             "session_id": session_id,
             "message": "Resume text parsed successfully",
             "name": resume_data.name,
             "email": resume_data.email,
-            "experience_count": len(resume_data.experience),
-            "projects_count": len(resume_data.projects),
-            "skills_count": sum(len(v) for v in resume_data.skills.values()),
-            "certifications_count": len(resume_data.certifications),
+            "experience_count": exp_count,
+            "projects_count": proj_count,
+            "skills_count": skills_count,
+            "certifications_count": certs_count,
         }
 
     except Exception as e:

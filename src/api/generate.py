@@ -21,7 +21,9 @@ from ..models import JobDescriptionRequest, ResumeResponse, ResumeVersion
 from ..llm.client_async import extract_keywords_async
 from ..core.resume_generator import generate_resume
 from ..core.ats_validator import validate_docx_file, validate_pdf_file
-from .deps import resume_data_cache, resume_versions, analysis_cache
+from ..metrics import metrics
+from ..db import save_generation
+from .deps import get_resume_data, has_session, resume_versions, analysis_cache
 
 # Try optimized version
 try:
@@ -53,14 +55,16 @@ async def create_resume(
 ):
     """Generate a tailored ATS-optimized resume."""
     use_fast_mode = fast_mode.lower() == "true"
-    if OPTIMIZED_AVAILABLE:
-        keywords = await extract_keywords_async_optimized(job_description, use_cache=True)
-    else:
-        keywords = await extract_keywords_async(job_description)
+    metrics.inc("resume_generations_total", labels={"format": output_format})
+    with metrics.timer("llm_keyword_extraction_seconds"):
+        if OPTIMIZED_AVAILABLE:
+            keywords = await extract_keywords_async_optimized(job_description, use_cache=True)
+        else:
+            keywords = await extract_keywords_async(job_description)
 
     resume_data = None
-    if session_id and session_id in resume_data_cache:
-        resume_data = resume_data_cache[session_id]
+    if session_id:
+        resume_data = get_resume_data(session_id)
 
     filename = f"ATS_resume_{uuid4().hex[:8]}.docx"
     output_path = OUTPUT_DIR / filename
@@ -111,6 +115,18 @@ async def create_resume(
     # ── Post-generation ATS validation ──
     validation = _run_post_gen_validation(str(output_path), resume_data, keywords)
 
+    # Persist to Supabase (fire-and-forget)
+    save_generation(
+        session_id=session_id or "",
+        filename=filename,
+        output_format="docx",
+        ats_score=validation.get("compatibility_score", 100),
+        ats_compatible=validation.get("ats_compatible", True),
+        ats_issues_count=len(validation.get("issues", [])),
+        keywords_used=keywords[:15] if keywords else [],
+        fast_mode=use_fast_mode,
+    )
+
     response = FileResponse(
         path=str(output_path),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -137,8 +153,8 @@ async def create_resume_api(
     keywords = await extract_keywords_async(payload.job_description)
 
     resume_data = None
-    if session_id and session_id in resume_data_cache:
-        resume_data = resume_data_cache[session_id]
+    if session_id:
+        resume_data = get_resume_data(session_id)
 
     if output_format.lower() == "pdf" and LATEX_AVAILABLE:
         filename = f"ATS_resume_{uuid4().hex[:8]}.pdf"
@@ -167,6 +183,17 @@ async def create_resume_api(
 
     # ── Post-generation ATS validation ──
     validation = _run_post_gen_validation(str(output_path), resume_data, keywords)
+
+    # Persist to Supabase (fire-and-forget)
+    save_generation(
+        session_id=session_id or "",
+        filename=filename,
+        output_format=output_format.lower(),
+        ats_score=validation.get("compatibility_score", 100),
+        ats_compatible=validation.get("ats_compatible", True),
+        ats_issues_count=len(validation.get("issues", [])),
+        keywords_used=keywords[:15] if keywords else [],
+    )
 
     return ResumeResponse(
         download_path=f"/download/{filename}",

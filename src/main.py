@@ -51,10 +51,15 @@ app.add_middleware(
     window_seconds=settings.rate_limit_window_seconds,
 )
 
-# 3. CORS (allow local dev)
+# 3. CORS (same-origin in prod; wide-open in dev for Vite proxy)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.debug else ["http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_origins=["*"] if settings.debug else [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "https://*.up.railway.app",
+    ],
+    allow_origin_regex=r"https://.*\.up\.railway\.app" if not settings.debug else None,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-ATS-Compatible", "X-ATS-Score", "X-ATS-Issues"],
@@ -143,7 +148,11 @@ async def spa_catch_all(request: Request, full_path: str):
 
 @app.on_event("startup")
 async def on_startup():
+    import asyncio
     from .llm.provider import get_provider_info
+    from .db import is_db_enabled
+    from .cleanup import cleanup_loop
+    from .tasks import task_queue
 
     info = get_provider_info()
     logger.info(
@@ -161,8 +170,19 @@ async def on_startup():
     else:
         logger.warning("⚠️  Frontend NOT built — %s does not exist", index_file)
 
+    # Log database status
+    if is_db_enabled():
+        logger.info("✅ Supabase connected — persisting all data (sessions, tasks, rate limits)")
+        # Mark tasks that were running/pending when server last stopped as failed
+        task_queue.startup_cleanup()
+    else:
+        logger.info("ℹ️  Supabase not configured — using in-memory storage only (data lost on restart)")
+
     if settings.debug:
         logger.info("⚠️  Debug mode ON — /docs enabled, CORS wide-open")
+
+    # Start background cleanup task
+    asyncio.create_task(cleanup_loop())
 
 
 @app.on_event("shutdown")

@@ -19,7 +19,7 @@ from ..core.ats_validator import (
     validate_pdf_file,
     sanitize_for_ats,
 )
-from .deps import resume_data_cache
+from .deps import get_resume_data
 
 router = APIRouter()
 
@@ -50,8 +50,8 @@ async def validate_generated_resume(
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
     resume_data = None
-    if session_id and session_id in resume_data_cache:
-        resume_data = resume_data_cache[session_id]
+    if session_id:
+        resume_data = get_resume_data(session_id)
 
     kw_list = [k.strip() for k in keywords.split(",")] if keywords else None
 
@@ -86,8 +86,8 @@ async def validate_resume_text(
     before generating the final DOCX/PDF.
     """
     resume_data = None
-    if session_id and session_id in resume_data_cache:
-        resume_data = resume_data_cache[session_id]
+    if session_id:
+        resume_data = get_resume_data(session_id)
 
     kw_list = [k.strip() for k in keywords.split(",")] if keywords else None
 

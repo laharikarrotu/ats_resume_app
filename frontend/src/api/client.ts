@@ -148,6 +148,12 @@ export async function generateCoverLetter(
   });
 }
 
+/* ── Resume Data Preview ── */
+
+export async function getResumeData(sessionId: string): Promise<any> {
+  return request(`/api/resume_data?session_id=${sessionId}`);
+}
+
 /* ── Versions ── */
 
 export async function getVersions(

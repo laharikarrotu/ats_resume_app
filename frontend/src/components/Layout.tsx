@@ -27,13 +27,13 @@ export default function Layout({ step, onReset, children }: Props) {
   const currentIdx = STEPS.findIndex((s) => s.key === step);
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-surface-dim">
       {/* ── Navbar ── */}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-6xl mx-auto flex items-center justify-between px-4 h-14 sm:h-16">
           {/* Logo */}
           <button onClick={onReset} className="flex items-center gap-2 group">
-            <div className="size-8 rounded-lg bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center">
+            <div className="size-8 rounded-lg bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center shadow-sm">
               <FileText className="size-4 text-white" />
             </div>
             <span className="font-bold text-lg hidden sm:inline bg-gradient-to-r from-primary-600 to-accent-600 bg-clip-text text-transparent">
@@ -53,21 +53,21 @@ export default function Layout({ step, onReset, children }: Props) {
                   } ${i === currentIdx ? "ring-2 ring-primary-200" : ""}`}
                 >
                   <span
-                    className={`size-5 rounded-full text-xs flex items-center justify-center font-bold ${
+                    className={`size-5 rounded-full text-xs flex items-center justify-center font-bold transition-all ${
                       i < currentIdx
                         ? "bg-primary-500 text-white"
                         : i === currentIdx
-                          ? "bg-primary-500 text-white"
+                          ? "bg-primary-500 text-white animate-pulse"
                           : "bg-slate-200 text-slate-500"
                     }`}
                   >
                     {i < currentIdx ? "✓" : s.num}
                   </span>
-                  {s.label}
+                  <span className="hidden lg:inline">{s.label}</span>
                 </div>
                 {i < STEPS.length - 1 && (
                   <div
-                    className={`w-6 h-0.5 mx-1 rounded ${
+                    className={`w-6 h-0.5 mx-1 rounded transition-all ${
                       i < currentIdx ? "bg-primary-400" : "bg-slate-200"
                     }`}
                   />
@@ -80,7 +80,7 @@ export default function Layout({ step, onReset, children }: Props) {
           <div className="flex items-center gap-2">
             <button
               onClick={onReset}
-              className="hidden sm:flex items-center gap-1 text-sm text-slate-500 hover:text-primary-600 transition-colors"
+              className="hidden sm:flex items-center gap-1 text-sm text-slate-500 hover:text-primary-600 transition-colors px-2 py-1 rounded-lg hover:bg-slate-50"
             >
               <RotateCcw className="size-3.5" />
               Start Over
@@ -90,21 +90,27 @@ export default function Layout({ step, onReset, children }: Props) {
               target="_blank"
               rel="noreferrer"
               className="size-8 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors text-slate-500"
+              aria-label="GitHub repository"
             >
               <Github className="size-4" />
             </a>
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
               className="md:hidden size-8 flex items-center justify-center rounded-lg hover:bg-slate-100"
+              aria-label="Toggle navigation"
             >
-              {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
+              {mobileOpen ? (
+                <X className="size-5" />
+              ) : (
+                <Menu className="size-5" />
+              )}
             </button>
           </div>
         </div>
 
         {/* Mobile stepper */}
         {mobileOpen && (
-          <nav className="md:hidden border-t border-slate-100 px-4 py-3 space-y-1 bg-white">
+          <nav className="md:hidden border-t border-slate-100 px-4 py-3 space-y-1 bg-white animate-in slide-in-from-top-2">
             {STEPS.map((s, i) => (
               <div
                 key={s.key}
@@ -137,7 +143,7 @@ export default function Layout({ step, onReset, children }: Props) {
       {/* ── Mobile progress bar ── */}
       <div className="md:hidden h-1 bg-slate-100">
         <div
-          className="h-full bg-gradient-to-r from-primary-500 to-accent-500 transition-all duration-500"
+          className="h-full bg-gradient-to-r from-primary-500 to-accent-500 transition-all duration-500 ease-out"
           style={{ width: `${((currentIdx + 1) / STEPS.length) * 100}%` }}
         />
       </div>

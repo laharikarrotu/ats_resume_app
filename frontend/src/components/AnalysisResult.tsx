@@ -4,6 +4,7 @@ import {
   XCircle,
   AlertTriangle,
   ArrowRight,
+  ArrowLeft,
   TrendingUp,
   Target,
   Lightbulb,
@@ -16,6 +17,7 @@ import type { AnalysisResponse } from "../types";
 interface Props {
   analysis: AnalysisResponse;
   onGenerate: () => void;
+  onBack: () => void;
   loading: boolean;
 }
 
@@ -105,7 +107,7 @@ function severityIcon(sev: string) {
   return <FileWarning className="size-3.5 mt-0.5 shrink-0" />;
 }
 
-export default function AnalysisResult({ analysis, onGenerate, loading }: Props) {
+export default function AnalysisResult({ analysis, onGenerate, onBack, loading }: Props) {
   const breakdown = analysis.score_breakdown ?? {};
 
   return (
@@ -312,20 +314,27 @@ export default function AnalysisResult({ analysis, onGenerate, loading }: Props)
       </div>
 
       {/* CTA */}
-      <div className="flex flex-col sm:flex-row items-center gap-4 pt-2">
+      <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+        <button
+          onClick={onBack}
+          className="w-full sm:w-auto px-4 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium text-sm hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
+        >
+          <ArrowLeft className="size-4" />
+          Edit Job Description
+        </button>
         <button
           onClick={onGenerate}
           disabled={loading}
-          className="w-full sm:w-auto px-8 py-3 rounded-xl bg-gradient-to-r from-primary-600 to-accent-600 text-white font-semibold text-sm hover:from-primary-700 hover:to-accent-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary-200"
+          className="w-full sm:w-auto flex-1 sm:flex-none px-8 py-3 rounded-xl bg-gradient-to-r from-primary-600 to-accent-600 text-white font-semibold text-sm hover:from-primary-700 hover:to-accent-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary-200"
         >
           <Zap className="size-4" />
           Generate Optimized Resume
           <ArrowRight className="size-4" />
         </button>
-        <p className="text-xs text-slate-400 text-center sm:text-left">
-          AI will rewrite your resume to maximize the ATS score above
-        </p>
       </div>
+      <p className="text-xs text-slate-400 text-center sm:text-left mt-2">
+        AI will rewrite your resume to maximize the ATS score above
+      </p>
     </motion.div>
   );
 }

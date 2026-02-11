@@ -44,6 +44,24 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     openai_api_key: str = ""
 
+    # ── Supabase ──
+    supabase_url: str = Field(default="", description="Supabase project URL (e.g., https://xxx.supabase.co)")
+    supabase_anon_key: str = Field(default="", description="Supabase anonymous/public API key")
+    supabase_service_role_key: str = Field(
+        default="", description="Supabase service role key (server-side only, optional)"
+    )
+
+    # ── Auth ──
+    api_keys: str = Field(
+        default="",
+        description="Comma-separated API keys. Empty = open access (no auth required)",
+    )
+
+    # ── Storage (S3 optional) ──
+    s3_bucket: str = Field(default="", description="S3 bucket name (empty = local storage)")
+    s3_region: str = Field(default="us-east-1", description="AWS region for S3")
+    s3_prefix: str = Field(default="ats-resume-app/", description="Key prefix in S3 bucket")
+
     # ── LLM settings ──
     llm_provider: str = Field(
         default="auto",

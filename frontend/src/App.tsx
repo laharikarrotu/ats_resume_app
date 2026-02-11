@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from "framer-motion";
 import Layout from "./components/Layout";
 import FileUpload from "./components/FileUpload";
 import JobDescription from "./components/JobDescription";
@@ -5,6 +6,12 @@ import AnalysisResult from "./components/AnalysisResult";
 import GenerateResume from "./components/GenerateResume";
 import { useResumeSession } from "./hooks/useResumeSession";
 import { analyzeResume } from "./api/client";
+
+const stepVariants = {
+  initial: { opacity: 0, x: 40 },
+  animate: { opacity: 1, x: 0 },
+  exit: { opacity: 0, x: -40 },
+};
 
 export default function App() {
   const {
@@ -40,8 +47,20 @@ export default function App() {
     }
   };
 
-  const handleGoToGenerate = () => {
-    setStep("generate");
+  const handleGoToGenerate = () => setStep("generate");
+
+  const handleBack = () => {
+    switch (step) {
+      case "describe":
+        setStep("upload");
+        break;
+      case "analyze":
+        setStep("describe");
+        break;
+      case "generate":
+        setStep("analyze");
+        break;
+    }
   };
 
   /* ── Render current step ── */
@@ -66,6 +85,7 @@ export default function App() {
             jobDescription={jobDescription}
             setJobDescription={setJobDescription}
             onAnalyze={handleAnalyze}
+            onBack={handleBack}
             loading={loading}
           />
         );
@@ -75,6 +95,7 @@ export default function App() {
           <AnalysisResult
             analysis={analysis}
             onGenerate={handleGoToGenerate}
+            onBack={handleBack}
             loading={loading}
           />
         ) : null;
@@ -84,6 +105,7 @@ export default function App() {
           <GenerateResume
             sessionId={session.sessionId}
             jobDescription={jobDescription}
+            onBack={handleBack}
             onReset={reset}
           />
         ) : null;
@@ -93,20 +115,39 @@ export default function App() {
   return (
     <Layout step={step} onReset={reset}>
       {/* Global error toast */}
-      {error && step !== "upload" && (
-        <div className="mb-6 max-w-3xl mx-auto bg-danger-400/10 text-danger-600 rounded-xl px-4 py-3 text-sm flex items-center gap-2">
-          <span className="shrink-0">⚠️</span>
-          {error}
-          <button
-            onClick={() => setError(null)}
-            className="ml-auto text-danger-400 hover:text-danger-600"
+      <AnimatePresence>
+        {error && step !== "upload" && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="mb-6 max-w-3xl mx-auto bg-danger-400/10 text-danger-600 rounded-xl px-4 py-3 text-sm flex items-center gap-2"
           >
-            ✕
-          </button>
-        </div>
-      )}
+            <span className="shrink-0">⚠️</span>
+            <span className="flex-1">{error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="ml-auto text-danger-400 hover:text-danger-600 font-bold"
+            >
+              ✕
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {renderStep()}
+      {/* Step content with transition */}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={step}
+          variants={stepVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          transition={{ duration: 0.25, ease: "easeInOut" }}
+        >
+          {renderStep()}
+        </motion.div>
+      </AnimatePresence>
     </Layout>
   );
 }
