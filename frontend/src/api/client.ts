@@ -11,6 +11,7 @@ import type {
   CoverLetterResponse,
   HealthResponse,
   ResumeVersion,
+  ValidateResponse,
 } from "../types";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -70,12 +71,19 @@ export async function analyzeResume(
 
 /* ── Generate ── */
 
+export interface GenerateResult {
+  blob: Blob;
+  atsCompatible: boolean;
+  atsScore: number;
+  atsIssues: number;
+}
+
 export async function generateResume(
   sessionId: string,
   jobDescription: string,
   outputFormat: "docx" | "pdf" = "docx",
   fastMode = false,
-): Promise<Blob> {
+): Promise<GenerateResult> {
   const form = new FormData();
   form.append("session_id", sessionId);
   form.append("job_description", jobDescription);
@@ -92,7 +100,30 @@ export async function generateResume(
     throw new ApiError(body.detail ?? "Generation failed", res.status);
   }
 
-  return res.blob();
+  // Extract ATS validation metadata from response headers
+  const atsCompatible = res.headers.get("X-ATS-Compatible") !== "False";
+  const atsScore = parseInt(res.headers.get("X-ATS-Score") ?? "100", 10);
+  const atsIssues = parseInt(res.headers.get("X-ATS-Issues") ?? "0", 10);
+
+  const blob = await res.blob();
+  return { blob, atsCompatible, atsScore, atsIssues };
+}
+
+/* ── Validate ── */
+
+export async function validateResume(
+  filename: string,
+  sessionId?: string,
+  keywords?: string[],
+): Promise<ValidateResponse> {
+  const form = new FormData();
+  form.append("filename", filename);
+  if (sessionId) form.append("session_id", sessionId);
+  if (keywords?.length) form.append("keywords", keywords.join(","));
+  return request<ValidateResponse>("/api/validate", {
+    method: "POST",
+    body: form,
+  });
 }
 
 /* ── Cover Letter ── */

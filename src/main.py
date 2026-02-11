@@ -6,13 +6,12 @@ with middleware, exception handling, and logging.
 """
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import settings, TEMPLATES_DIR, STATIC_DIR
+from .config import settings, FRONTEND_DIST_DIR
 from .exceptions import AppError
 from .logger import setup_logging, logger
 from .middleware import RateLimitMiddleware, RequestLoggingMiddleware
@@ -58,6 +57,7 @@ app.add_middleware(
     allow_origins=["*"] if settings.debug else ["http://localhost:8000", "http://127.0.0.1:8000"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-ATS-Compatible", "X-ATS-Score", "X-ATS-Issues"],
 )
 
 # 4. GZip compression
@@ -93,37 +93,25 @@ async def unhandled_error_handler(_request: Request, exc: Exception) -> JSONResp
 
 
 # ═══════════════════════════════════════════════════════════
-# Static Files + Templates
+# Serve React SPA from frontend/dist
 # ═══════════════════════════════════════════════════════════
 
-class CachedStaticFiles(StaticFiles):
-    async def __call__(self, scope, receive, send):
-        async def send_with_cache(message):
-            if message["type"] == "http.response.start":
-                existing_headers = list(message.get("headers", []))
-                existing_headers.append(
-                    (b"cache-control", b"public, max-age=31536000, immutable")
-                )
-                message["headers"] = existing_headers
-            await send(message)
+if FRONTEND_DIST_DIR.exists():
+    # Serve built assets (JS, CSS, images) with long cache
+    class CachedStaticFiles(StaticFiles):
+        async def __call__(self, scope, receive, send):
+            async def send_with_cache(message):
+                if message["type"] == "http.response.start":
+                    existing_headers = list(message.get("headers", []))
+                    existing_headers.append(
+                        (b"cache-control", b"public, max-age=31536000, immutable")
+                    )
+                    message["headers"] = existing_headers
+                await send(message)
 
-        await super().__call__(scope, receive, send_with_cache)
+            await super().__call__(scope, receive, send_with_cache)
 
-
-app.mount("/static", CachedStaticFiles(directory=str(STATIC_DIR)), name="static")
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-
-# ═══════════════════════════════════════════════════════════
-# Root Page
-# ═══════════════════════════════════════════════════════════
-
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse(
-        "index.html",
-        {"request": request, "title": settings.app_title},
-    )
+    app.mount("/assets", CachedStaticFiles(directory=str(FRONTEND_DIST_DIR / "assets")), name="assets")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -131,6 +119,22 @@ async def index(request: Request):
 # ═══════════════════════════════════════════════════════════
 
 app.include_router(router)
+
+
+# ═══════════════════════════════════════════════════════════
+# SPA Catch-All (serve index.html for all non-API routes)
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def spa_catch_all(request: Request, full_path: str):
+    """Serve the React SPA index.html for any non-API route."""
+    index_file = FRONTEND_DIST_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(str(index_file), media_type="text/html")
+    return HTMLResponse(
+        content="<h1>Frontend not built</h1><p>Run <code>cd frontend && npm run build</code></p>",
+        status_code=200,
+    )
 
 
 # ═══════════════════════════════════════════════════════════

@@ -9,8 +9,11 @@ import {
   RotateCcw,
   Zap,
   Sparkles,
+  ShieldCheck,
+  AlertTriangle,
 } from "lucide-react";
 import { generateResume } from "../api/client";
+import type { GenerateResult } from "../api/client";
 
 interface Props {
   sessionId: string;
@@ -29,16 +32,23 @@ export default function GenerateResume({
   const [fastMode, setFastMode] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [atsResult, setAtsResult] = useState<Pick<GenerateResult, "atsCompatible" | "atsScore" | "atsIssues"> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleGenerate = async () => {
     setGenerating(true);
     setError(null);
     setDownloadUrl(null);
+    setAtsResult(null);
     try {
-      const blob = await generateResume(sessionId, jobDescription, format, fastMode);
-      const url = URL.createObjectURL(blob);
+      const result = await generateResume(sessionId, jobDescription, format, fastMode);
+      const url = URL.createObjectURL(result.blob);
       setDownloadUrl(url);
+      setAtsResult({
+        atsCompatible: result.atsCompatible,
+        atsScore: result.atsScore,
+        atsIssues: result.atsIssues,
+      });
 
       // Auto-trigger download
       const a = document.createElement("a");
@@ -162,6 +172,28 @@ export default function GenerateResume({
             <p className="text-sm font-semibold text-success-600">
               Resume generated successfully!
             </p>
+
+            {/* ATS Validation Badge */}
+            {atsResult && (
+              <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium ${
+                atsResult.atsCompatible
+                  ? "bg-success-100 text-success-700"
+                  : "bg-warning-100 text-warning-700"
+              }`}>
+                {atsResult.atsCompatible ? (
+                  <ShieldCheck className="size-4" />
+                ) : (
+                  <AlertTriangle className="size-4" />
+                )}
+                ATS Compatibility: {atsResult.atsScore}/100
+                {atsResult.atsIssues > 0 && (
+                  <span className="text-xs opacity-75">
+                    ({atsResult.atsIssues} issue{atsResult.atsIssues > 1 ? "s" : ""})
+                  </span>
+                )}
+              </div>
+            )}
+
             <div className="flex flex-col sm:flex-row gap-2 justify-center">
               <a
                 href={downloadUrl}

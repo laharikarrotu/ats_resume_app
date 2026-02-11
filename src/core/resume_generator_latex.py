@@ -1,31 +1,38 @@
 """
-LaTeX Resume Generator — ATS-Optimized, One-Page Resume
+LaTeX Resume Generator — ATS-Optimized for Top 10 ATS Platforms.
+
+Compliant with: Workday (45%), Taleo (20%), Greenhouse (15%), Lever (10%),
+                iCIMS, BambooHR, JazzHR, SmartRecruiters, Bullhorn, ADP.
 
 Layout (US Letter, Helvetica 10pt):
   ┌──────────────────────────────────────┐
-  │          FIRSTNAME LASTNAME          │  ← centered, bold, large
-  │  City, ST | email | phone | LI | GH │  ← centered contact line
-  ├── EXPERIENCE ────────────────────────┤
+  │          FIRSTNAME LASTNAME          │  ← centered, bold, 14pt
+  │  email | phone | LI | GH | City,ST  │  ← ONE line, centered
+  ├── WORK EXPERIENCE ───────────────────┤
   │  Title                     Dates     │
-  │  Company                   Location  │
-  │  • bullet with metrics …             │
+  │  Company (italic)                    │
+  │  - bullet with action verb + metrics │
   ├── PROJECTS ──────────────────────────┤
-  │  Name | Tech1, Tech2        Link     │
-  │  • description bullet …              │
+  │  Name | Tech1, Tech2                 │
+  │  - description bullet with impact    │
   ├── EDUCATION ─────────────────────────┤
   │  Degree                     Year     │
   │  University, Location                │
   ├── TECHNICAL SKILLS ──────────────────┤
   │  Category: skill1, skill2, …         │
   ├── CERTIFICATIONS ────────────────────┤
-  │  Cert Name — Issuer          Year    │
+  │  Cert Name - Issuer          Year    │
   └──────────────────────────────────────┘
 
-Rules:
-  • ONE page preferred (font shrinks 10→9 if needed)
-  • If 2 pages: must fill both (no half-empty second page)
-  • ATS-safe: no tables, no graphics, no columns
-  • Helvetica (closest standard font to Calibri in LaTeX)
+ATS Rules Enforced:
+  ✓ Single column — NO tables, NO columns, NO text boxes
+  ✓ Contact on ONE line in body (not header/footer)
+  ✓ Standard section names: WORK EXPERIENCE, EDUCATION, TECHNICAL SKILLS
+  ✓ Simple bullets (-, •) ONLY
+  ✓ Left-aligned content
+  ✓ Helvetica 10pt (closest to Calibri in LaTeX)
+  ✓ No images, graphics, icons
+  ✓ Dates in "Month YYYY" format
 """
 
 import subprocess
@@ -254,7 +261,7 @@ def _build_experience(
     if not data.experience:
         return ""
 
-    lines = ["\\section{Experience}", ""]
+    lines = ["\\section{Work Experience}", ""]
 
     # Prioritize relevant experiences if JD available
     experiences = data.experience

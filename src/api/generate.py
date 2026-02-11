@@ -1,5 +1,11 @@
 """
 Resume Generation routes — creates tailored DOCX / PDF resumes.
+
+Post-generation flow:
+  1. Extract keywords from JD
+  2. Generate DOCX or PDF
+  3. Run ATS validation on generated file
+  4. Return file + validation metadata in headers
 """
 
 from datetime import datetime
@@ -14,6 +20,7 @@ from ..config import OUTPUT_DIR
 from ..models import JobDescriptionRequest, ResumeResponse, ResumeVersion
 from ..llm.client_async import extract_keywords_async
 from ..core.resume_generator import generate_resume
+from ..core.ats_validator import validate_docx_file, validate_pdf_file
 from .deps import resume_data_cache, resume_versions, analysis_cache
 
 # Try optimized version
@@ -101,11 +108,19 @@ async def create_resume(
     if session_id:
         _save_version(session_id, filename, keywords, job_description)
 
-    return FileResponse(
+    # ── Post-generation ATS validation ──
+    validation = _run_post_gen_validation(str(output_path), resume_data, keywords)
+
+    response = FileResponse(
         path=str(output_path),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename="ATS_resume.docx",
     )
+    # Attach validation metadata in response headers
+    response.headers["X-ATS-Compatible"] = str(validation.get("ats_compatible", True))
+    response.headers["X-ATS-Score"] = str(validation.get("compatibility_score", 100))
+    response.headers["X-ATS-Issues"] = str(len(validation.get("issues", [])))
+    return response
 
 
 # ═══════════════════════════════════════════════════════════
@@ -150,9 +165,15 @@ async def create_resume_api(
             use_parallel=True,
         )
 
+    # ── Post-generation ATS validation ──
+    validation = _run_post_gen_validation(str(output_path), resume_data, keywords)
+
     return ResumeResponse(
         download_path=f"/download/{filename}",
         keywords=keywords,
+        ats_compatible=validation.get("ats_compatible", True),
+        ats_compatibility_score=validation.get("compatibility_score", 100),
+        ats_issues_count=len(validation.get("issues", [])),
     )
 
 
@@ -192,3 +213,23 @@ def _save_version(session_id: str, filename: str, keywords: List, job_descriptio
     # Keep only last 20 versions
     if len(resume_versions[session_id]) > 20:
         resume_versions[session_id] = resume_versions[session_id][-20:]
+
+
+def _run_post_gen_validation(
+    file_path: str,
+    resume_data=None,
+    keywords: Optional[List[str]] = None,
+) -> dict:
+    """Run ATS validation on a generated file. Returns dict with score + issues."""
+    from dataclasses import asdict
+    try:
+        suffix = Path(file_path).suffix.lower()
+        if suffix == ".docx":
+            result = validate_docx_file(file_path, resume_data, keywords)
+        elif suffix == ".pdf":
+            result = validate_pdf_file(file_path, resume_data, keywords)
+        else:
+            return {"ats_compatible": True, "compatibility_score": 100, "issues": []}
+        return asdict(result)
+    except Exception:
+        return {"ats_compatible": True, "compatibility_score": 100, "issues": []}

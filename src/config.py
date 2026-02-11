@@ -15,10 +15,9 @@ from pydantic_settings import BaseSettings
 # ── Derived project paths (not configurable, always relative to repo root) ──
 BASE_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = BASE_DIR / "outputs"
-TEMPLATES_DIR = BASE_DIR / "templates"
-STATIC_DIR = BASE_DIR / "static"
 UPLOAD_DIR = BASE_DIR / "uploads"
 RESUME_TEMPLATES_DIR = BASE_DIR / "resume_templates"
+FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
 
 # Ensure required directories exist at import time
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

@@ -21,22 +21,34 @@ class ResumeResponse(BaseModel):
         ...,
         description="Keywords extracted from the job description.",
     )
+    ats_compatible: bool = Field(
+        default=True,
+        description="Whether the generated resume passed ATS compatibility checks.",
+    )
+    ats_compatibility_score: int = Field(
+        default=100,
+        description="ATS compatibility score 0-100 (post-generation validation).",
+    )
+    ats_issues_count: int = Field(
+        default=0,
+        description="Number of ATS issues found in the generated resume.",
+    )
 
 
 # Resume Data Models for Parsing
 class Education(BaseModel):
-    degree: str = Field(..., description="Degree name")
+    degree: str = Field(..., description="Degree name (e.g., 'Master's in Computer Science')")
     university: str = Field(default="", description="University name")
     location: str = Field(default="", description="University location")
-    dates: str = Field(default="", description="Date range")
+    dates: str = Field(default="", description="Date range (e.g., '2022-2024')")
     gpa: str = Field(default="", description="GPA if mentioned")
-    coursework: List[str] = Field(default_factory=list, description="Relevant coursework")
+    coursework: List[str] = Field(default_factory=list, description="List of relevant coursework")
 
 
 class Experience(BaseModel):
     title: str = Field(..., description="Job title")
     company: str = Field(..., description="Company name")
-    dates: str = Field(default="", description="Date range")
+    dates: str = Field(default="", description="Date range (e.g., 'May 2025 - Present')")
     bullets: List[str] = Field(default_factory=list, description="Achievement bullet points")
 
 
@@ -64,80 +76,105 @@ class ResumeData(BaseModel):
     education: List[Education] = Field(default_factory=list, description="Education history")
     skills: Dict[str, List[str]] = Field(
         default_factory=dict,
-        description="Technical skills organized by category"
+        description="Technical skills organized by category (e.g., 'Programming': ['Python', 'Java'])"
     )
     experience: List[Experience] = Field(default_factory=list, description="Work experience")
     projects: List[Project] = Field(default_factory=list, description="Projects")
     certifications: List[Certification] = Field(default_factory=list, description="Certifications")
 
 
+# ═══════════════════════════════════════════════════════════════
 # ATS Analysis Models
+# ═══════════════════════════════════════════════════════════════
 
 class ATSFormatIssue(BaseModel):
-    severity: str = Field(..., description="critical, warning, or info")
-    category: str = Field(..., description="formatting, content, structure, keywords")
-    message: str = Field(..., description="Human-readable description")
-    suggestion: str = Field(default="", description="How to fix")
+    """A single ATS formatting issue found in the resume."""
+    severity: str = Field(..., description="'critical', 'warning', or 'info'")
+    category: str = Field(..., description="Category: 'formatting', 'content', 'structure', 'keywords'")
+    message: str = Field(..., description="Human-readable description of the issue")
+    suggestion: str = Field(default="", description="How to fix the issue")
 
 
 class KeywordMatch(BaseModel):
+    """Keyword match between job description and resume."""
     keyword: str = Field(..., description="The keyword/skill")
-    found_in_resume: bool = Field(default=False)
-    context: str = Field(default="", description="Where found in resume")
-    importance: str = Field(default="medium", description="high, medium, or low")
+    found_in_resume: bool = Field(default=False, description="Whether this keyword appears in the resume")
+    context: str = Field(default="", description="Where in the resume it was found")
+    importance: str = Field(default="medium", description="'high', 'medium', or 'low' importance")
 
 
 class SkillGap(BaseModel):
+    """A skill gap between the job requirements and the resume."""
     skill: str = Field(..., description="The missing skill")
-    importance: str = Field(default="medium", description="critical, high, medium, low")
+    importance: str = Field(default="medium", description="'critical', 'high', 'medium', or 'low'")
     suggestion: str = Field(default="", description="How to address this gap")
-    related_skills: List[str] = Field(default_factory=list, description="Similar skills you have")
+    related_skills: List[str] = Field(default_factory=list, description="Similar skills you DO have")
 
 
 class BulletAnalysis(BaseModel):
+    """Analysis of a single resume bullet point."""
     original: str = Field(..., description="Original bullet text")
-    has_metrics: bool = Field(default=False)
-    has_action_verb: bool = Field(default=False)
-    action_verb_suggestion: str = Field(default="")
-    metric_suggestion: str = Field(default="")
-    improved: str = Field(default="", description="Improved version")
+    has_metrics: bool = Field(default=False, description="Contains quantifiable metrics")
+    has_action_verb: bool = Field(default=False, description="Starts with a strong action verb")
+    action_verb_suggestion: str = Field(default="", description="Suggested stronger action verb")
+    metric_suggestion: str = Field(default="", description="Suggestion to add quantification")
+    improved: str = Field(default="", description="Improved version of the bullet")
     score: int = Field(default=50, description="Quality score 0-100")
 
 
 class ATSAnalysisResult(BaseModel):
+    """Complete ATS analysis result for a resume against a job description."""
+    # Overall Score
     overall_score: int = Field(default=0, description="Overall ATS score 0-100")
-    score_breakdown: Dict[str, int] = Field(default_factory=dict)
-    grade: str = Field(default="C", description="Letter grade")
-    keyword_matches: List[KeywordMatch] = Field(default_factory=list)
-    keyword_match_percentage: float = Field(default=0.0)
-    matched_keywords: List[str] = Field(default_factory=list)
-    missing_keywords: List[str] = Field(default_factory=list)
-    skill_gaps: List[SkillGap] = Field(default_factory=list)
-    format_issues: List[ATSFormatIssue] = Field(default_factory=list)
-    bullet_analyses: List[BulletAnalysis] = Field(default_factory=list)
-    bullets_with_metrics_pct: float = Field(default=0.0)
-    bullets_with_action_verbs_pct: float = Field(default=0.0)
-    top_recommendations: List[str] = Field(default_factory=list)
+    score_breakdown: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Score breakdown by category (keyword_match, formatting, content_quality, etc.)"
+    )
+    grade: str = Field(default="C", description="Letter grade: A+, A, B+, B, C+, C, D, F")
+
+    # Keyword Analysis
+    keyword_matches: List[KeywordMatch] = Field(default_factory=list, description="Keyword match details")
+    keyword_match_percentage: float = Field(default=0.0, description="Percentage of JD keywords found")
+    matched_keywords: List[str] = Field(default_factory=list, description="Keywords found in resume")
+    missing_keywords: List[str] = Field(default_factory=list, description="Keywords NOT found in resume")
+
+    # Skills Gap
+    skill_gaps: List[SkillGap] = Field(default_factory=list, description="Skills gap analysis")
+
+    # Format Issues
+    format_issues: List[ATSFormatIssue] = Field(default_factory=list, description="ATS formatting issues")
+
+    # Bullet Analysis
+    bullet_analyses: List[BulletAnalysis] = Field(default_factory=list, description="Per-bullet analysis")
+    bullets_with_metrics_pct: float = Field(default=0.0, description="% of bullets with quantifiable metrics")
+    bullets_with_action_verbs_pct: float = Field(default=0.0, description="% of bullets starting with action verbs")
+
+    # Recommendations
+    top_recommendations: List[str] = Field(default_factory=list, description="Top 5 actionable recommendations")
 
 
 class CoverLetterRequest(BaseModel):
-    job_description: str = Field(..., min_length=10)
-    company_name: str = Field(default="")
-    job_title: str = Field(default="")
-    tone: str = Field(default="professional")
+    """Request to generate a cover letter."""
+    job_description: str = Field(..., min_length=10, description="Job description text")
+    company_name: str = Field(default="", description="Company name for personalization")
+    job_title: str = Field(default="", description="Job title applying for")
+    tone: str = Field(default="professional", description="'professional', 'enthusiastic', or 'conversational'")
 
 
 class CoverLetterResponse(BaseModel):
+    """Generated cover letter response."""
     cover_letter: str = Field(..., description="Generated cover letter text")
-    word_count: int = Field(default=0)
-    key_points: List[str] = Field(default_factory=list)
+    word_count: int = Field(default=0, description="Word count")
+    key_points: List[str] = Field(default_factory=list, description="Key points addressed")
 
 
 class ResumeVersion(BaseModel):
+    """A saved resume version for a specific job application."""
     version_id: str = Field(..., description="Unique version identifier")
-    job_title: str = Field(default="")
-    company: str = Field(default="")
-    created_at: str = Field(default="")
-    filename: str = Field(default="")
-    ats_score: int = Field(default=0)
-    keywords_used: List[str] = Field(default_factory=list)
+    job_title: str = Field(default="", description="Target job title")
+    company: str = Field(default="", description="Target company")
+    created_at: str = Field(default="", description="Creation timestamp")
+    filename: str = Field(default="", description="Generated file name")
+    ats_score: int = Field(default=0, description="ATS score for this version")
+    keywords_used: List[str] = Field(default_factory=list, description="Keywords used in this version")
+

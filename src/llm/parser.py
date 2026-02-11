@@ -120,11 +120,15 @@ def _json_to_resume_data(data: dict) -> ResumeData:
     education = []
     for edu in data.get("education", []):
         if isinstance(edu, dict):
+            # Clean dates — remove wrapping parens like "(2024)" → "2024"
+            dates_raw = edu.get("dates", edu.get("date", ""))
+            if isinstance(dates_raw, str):
+                dates_raw = dates_raw.strip("()")
             education.append(Education(
                 degree=edu.get("degree", ""),
                 university=edu.get("university", edu.get("school", "")),
                 location=edu.get("location", ""),
-                dates=edu.get("dates", edu.get("date", "")),
+                dates=dates_raw,
                 gpa=edu.get("gpa", ""),
                 coursework=edu.get("coursework", edu.get("relevant_coursework", []))
             ))

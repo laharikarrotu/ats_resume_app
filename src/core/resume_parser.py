@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from docx import Document
-import pdfplumber
-from pypdf import PdfReader
 
 from ..models import (
     ResumeData,
@@ -25,6 +23,7 @@ from ..models import (
     Project,
     Certification,
 )
+from ..logger import logger
 
 # Try to import LLM parser, fallback if not available
 try:
@@ -32,6 +31,9 @@ try:
     LLM_PARSER_AVAILABLE = True
 except ImportError:
     LLM_PARSER_AVAILABLE = False
+
+# Smart PDF extractor with space recovery + link extraction
+from .pdf_extractor import extract_text_from_pdf as _smart_pdf_extract, extract_pdf_links
 
 
 def parse_resume(file_path: str) -> ResumeData:
@@ -49,8 +51,11 @@ def parse_resume(file_path: str) -> ResumeData:
     if not path.exists():
         raise FileNotFoundError(f"Resume file not found: {file_path}")
     
+    pdf_links: dict = {}
+
     if path.suffix.lower() == '.pdf':
-        text = _extract_text_from_pdf(file_path)
+        text = _smart_pdf_extract(file_path)
+        pdf_links = extract_pdf_links(file_path)
     elif path.suffix.lower() in ['.docx', '.doc']:
         text = _extract_text_from_docx(file_path)
     elif path.suffix.lower() in ['.txt', '.text']:
@@ -58,7 +63,17 @@ def parse_resume(file_path: str) -> ResumeData:
     else:
         raise ValueError(f"Unsupported file format: {path.suffix}. Supported: PDF, DOCX, TXT.")
     
-    return _parse_text(text)
+    logger.info("Extracted %d chars from %s", len(text), path.name)
+    result = _parse_text(text)
+
+    # Enrich with PDF hyperlinks if the text only had labels (e.g., "LinkedIn", "GitHub")
+    if pdf_links:
+        if pdf_links.get("linkedin") and (not result.linkedin or result.linkedin == "LinkedIn"):
+            result.linkedin = pdf_links["linkedin"]
+        if pdf_links.get("github") and (not result.github or result.github == "GitHub"):
+            result.github = pdf_links["github"]
+
+    return result
 
 
 def parse_resume_from_text(text: str) -> ResumeData:
@@ -77,38 +92,19 @@ def parse_resume_from_text(text: str) -> ResumeData:
 
 
 def _parse_text(text: str) -> ResumeData:
-    """Route text through LLM parser (if available) or basic parser."""
-    # Use LLM parser for high accuracy (>90%), fallback to basic parser
+    """Route text through LLM parser (if available) or basic regex parser."""
     if LLM_PARSER_AVAILABLE:
         try:
-            return parse_resume_with_llm(text)
+            result = parse_resume_with_llm(text)
+            logger.info("LLM parser succeeded: %s, %d exp, %d projects",
+                        result.name, len(result.experience), len(result.projects))
+            return result
         except Exception as e:
-            print(f"LLM parser failed: {e}. Using basic parser as fallback.")
+            logger.warning("LLM parser failed: %s — falling back to regex parser", e)
             return _parse_text_to_resume_data(text)
     else:
-        # Fallback to basic parsing
+        logger.info("LLM parser not available, using regex parser")
         return _parse_text_to_resume_data(text)
-
-
-def _extract_text_from_pdf(file_path: str) -> str:
-    """Extract text from PDF file using pdfplumber (better for structured text)."""
-    text_parts = []
-    
-    try:
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    text_parts.append(text)
-    except Exception as e:
-        # Fallback to pypdf if pdfplumber fails
-        reader = PdfReader(file_path)
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                text_parts.append(text)
-    
-    return "\n".join(text_parts)
 
 
 def _extract_text_from_txt(file_path: str) -> str:
@@ -136,30 +132,66 @@ def _extract_text_from_docx(file_path: str) -> str:
     return "\n".join(text_parts)
 
 
+def _find_section_boundaries(lines: List[str]) -> Dict[str, int]:
+    """
+    Find the start line index of each major resume section.
+    Returns a dict like {'experience': 5, 'education': 30, 'skills': 35, ...}
+    """
+    section_patterns = {
+        "experience": r"^(?:work\s+)?experience|^employment|^professional\s+experience",
+        "education": r"^education",
+        "skills": r"^(?:technical\s+)?skills?$",
+        "projects": r"^projects?$",
+        "certifications": r"^certifications?|^licenses?\s*(?:&|and)?\s*certifications?",
+        "summary": r"^(?:professional\s+)?summary|^objective|^profile",
+    }
+    boundaries: Dict[str, int] = {}
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        for section, pattern in section_patterns.items():
+            if section not in boundaries and re.search(pattern, stripped, re.IGNORECASE):
+                boundaries[section] = i
+    return boundaries
+
+
+def _get_section_lines(lines: List[str], boundaries: Dict[str, int], section: str) -> List[str]:
+    """Get all lines belonging to a section (from its header to the next section header)."""
+    if section not in boundaries:
+        return []
+    start = boundaries[section] + 1  # skip the header line itself
+    # Find the next section that starts after this one
+    all_starts = sorted(boundaries.values())
+    idx = all_starts.index(boundaries[section])
+    end = all_starts[idx + 1] if idx + 1 < len(all_starts) else len(lines)
+    return lines[start:end]
+
+
 def _parse_text_to_resume_data(text: str) -> ResumeData:
     """
-    Parse extracted text into structured ResumeData.
-    
-    Uses pattern matching and heuristics to identify sections.
+    Parse extracted text into structured ResumeData using robust regex patterns.
+    This is the fallback parser when LLM is unavailable.
     """
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     full_text = '\n'.join(lines)
-    
+
+    # Find section boundaries first
+    boundaries = _find_section_boundaries(lines)
+
     # Extract contact information
-    name = _extract_name(lines)
+    name = _extract_name(lines, boundaries)
     email = _extract_email(full_text)
     phone = _extract_phone(full_text)
     linkedin = _extract_linkedin(full_text)
     github = _extract_github(full_text)
     location = _extract_location(full_text)
-    
-    # Extract sections
-    education = _extract_education(full_text, lines)
-    skills = _extract_skills(full_text, lines)
-    experience = _extract_experience(full_text, lines)
-    projects = _extract_projects(full_text, lines)
-    certifications = _extract_certifications(full_text, lines)
-    
+
+    # Extract sections using boundaries
+    education = _extract_education(lines, boundaries)
+    skills = _extract_skills(lines, boundaries)
+    experience = _extract_experience(lines, boundaries)
+    projects = _extract_projects(lines, boundaries)
+    certifications = _extract_certifications(lines, boundaries)
+
     return ResumeData(
         name=name or "Your Name",
         email=email or "",
@@ -175,379 +207,419 @@ def _parse_text_to_resume_data(text: str) -> ResumeData:
     )
 
 
-def _extract_name(lines: List[str]) -> Optional[str]:
-    """Extract name (usually first line or first few words)."""
+# ═══════════════════════════════════════════════════════════
+# Contact Information Extraction
+# ═══════════════════════════════════════════════════════════
+
+def _extract_name(lines: List[str], boundaries: Dict[str, int]) -> Optional[str]:
+    """Extract name — typically the first non-empty line before any section header."""
     if not lines:
         return None
-    
-    # Name is typically the first line, all caps, or title case
-    first_line = lines[0]
-    
-    # If it's all caps or title case and not too long, it's likely the name
-    if len(first_line.split()) <= 4 and (first_line.isupper() or first_line.istitle()):
-        return first_line
-    
-    # Check first few lines
-    for line in lines[:3]:
-        if len(line.split()) <= 4 and line.istitle() and not any(
-            keyword in line.lower() for keyword in ['email', 'phone', 'linkedin', 'github', 'resume']
-        ):
-            return line
-    
+
+    # The name is almost always line 0 or within the first 3 lines
+    first_section = min(boundaries.values()) if boundaries else len(lines)
+
+    for line in lines[:min(first_section, 5)]:
+        # Skip lines that look like contact info
+        if "@" in line or "linkedin" in line.lower() or "github" in line.lower():
+            continue
+        if re.search(r'\d{3}.*\d{4}', line):  # phone number
+            continue
+        # Name: 2-4 words, no special characters except hyphens
+        words = line.split()
+        if 1 <= len(words) <= 5:
+            # Remove pipe-separated contact info from the line
+            clean = line.split("|")[0].strip()
+            if clean and not any(kw in clean.lower() for kw in ["email", "phone", "resume", "http"]):
+                return clean
     return None
 
 
 def _extract_email(text: str) -> Optional[str]:
     """Extract email address using regex."""
-    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-    match = re.search(email_pattern, text)
+    match = re.search(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', text)
     return match.group(0) if match else None
 
 
 def _extract_phone(text: str) -> Optional[str]:
-    """Extract phone number using regex."""
-    # Match various phone formats: (123) 456-7890, 123-456-7890, +1 123 456 7890, etc.
-    phone_patterns = [
-        r'\+?1?\s?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',
-        r'\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',
+    """Extract phone number — handles many formats."""
+    patterns = [
+        r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',
+        r'\+?1[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',
     ]
-    
-    for pattern in phone_patterns:
+    for pattern in patterns:
         match = re.search(pattern, text)
         if match:
             return match.group(0).strip()
-    
     return None
 
 
 def _extract_linkedin(text: str) -> Optional[str]:
     """Extract LinkedIn profile URL."""
-    patterns = [
-        r'linkedin\.com/in/[\w-]+',
-        r'linkedin\.com/[\w-]+',
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return f"https://{match.group(0)}"
-    
+    match = re.search(r'(?:https?://)?(?:www\.)?linkedin\.com/in/[\w-]+', text, re.IGNORECASE)
+    if match:
+        url = match.group(0)
+        return url if url.startswith("http") else f"https://{url}"
+    # Also check for just the word "LinkedIn" as a hyperlink label
     return None
 
 
 def _extract_github(text: str) -> Optional[str]:
     """Extract GitHub profile URL."""
-    patterns = [
-        r'github\.com/[\w-]+',
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return f"https://{match.group(0)}"
-    
+    match = re.search(r'(?:https?://)?(?:www\.)?github\.com/[\w-]+', text, re.IGNORECASE)
+    if match:
+        url = match.group(0)
+        return url if url.startswith("http") else f"https://{url}"
     return None
 
 
 def _extract_location(text: str) -> Optional[str]:
-    """Extract location (city, state or city, country)."""
-    # Look for patterns like "City, State" or "City, Country"
-    location_pattern = r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2}|[A-Z][a-z]+)'
-    match = re.search(location_pattern, text)
+    """Extract location (City, State/Country)."""
+    # Pattern: "City, ST" or "City, State"
+    match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\b', text)
     if match:
         return match.group(0)
-    
-    # Fallback: look for common location keywords
-    location_keywords = ['Vacaville', 'CA', 'California', 'Florida', 'New York', 'Texas']
-    for keyword in location_keywords:
-        if keyword in text:
-            # Try to find the full location context
-            context_match = re.search(rf'[^,\n]*{re.escape(keyword)}[^,\n]*', text)
-            if context_match:
-                return context_match.group(0).strip()
-    
+    # Broader: "City, State Name"
+    match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', text)
+    if match:
+        return match.group(0)
     return None
 
 
-def _extract_education(text: str, lines: List[str]) -> List[Education]:
-    """Extract education information."""
-    education_list = []
-    
-    # Find education section
-    education_start = -1
-    for i, line in enumerate(lines):
-        if re.search(r'education', line, re.IGNORECASE):
-            education_start = i
-            break
-    
-    if education_start == -1:
-        return education_list
-    
-    # Extract education entries (usually 2-3 entries)
-    current_education = None
-    for i in range(education_start + 1, min(education_start + 20, len(lines))):
-        line = lines[i]
-        
-        # Check if we've hit the next major section
-        if re.search(r'(experience|skills|projects|certifications|technical)', line, re.IGNORECASE):
-            if current_education:
-                education_list.append(current_education)
-            break
-        
-        # Look for degree patterns (Master's, Bachelor's, PhD, etc.)
-        degree_match = re.search(
-            r'(Master\'?s?|Bachelor\'?s?|PhD|Ph\.D\.|Doctorate|Associate)\s+(?:in|of)?\s+([A-Z][\w\s&]+)',
-            line,
-            re.IGNORECASE
-        )
-        
-        if degree_match:
-            if current_education:
-                education_list.append(current_education)
-            
-            degree = degree_match.group(0)
-            current_education = Education(
-                degree=degree,
-                university="",
-                location="",
-                dates="",
-                gpa="",
-                coursework=[]
-            )
-        elif current_education:
-            # Extract university name
-            if not current_education.university and len(line.split()) <= 5:
-                # Likely university name
-                if any(keyword in line.lower() for keyword in ['university', 'college', 'institute', 'tech']):
-                    current_education.university = line
-            
-            # Extract dates (YYYY-YYYY or YYYY - YYYY)
-            date_match = re.search(r'(\d{4})\s*[-–]\s*(\d{4}|Present|Current)', line)
-            if date_match:
-                current_education.dates = date_match.group(0)
-            
-            # Extract GPA
-            gpa_match = re.search(r'GPA[:\s]+([\d.]+)', line, re.IGNORECASE)
-            if gpa_match:
-                current_education.gpa = gpa_match.group(1)
-            
-            # Extract coursework
-            if 'coursework' in line.lower() or 'courses' in line.lower():
-                # Next few lines might be coursework
-                coursework_text = ' '.join(lines[i+1:i+3])
-                coursework_items = re.findall(r'([A-Z][\w\s&]+)', coursework_text)
-                current_education.coursework = coursework_items[:10]  # Limit to 10 items
-    
-    if current_education:
-        education_list.append(current_education)
-    
-    return education_list
+# ═══════════════════════════════════════════════════════════
+# Experience Extraction (most critical section)
+# ═══════════════════════════════════════════════════════════
 
+def _extract_experience(lines: List[str], boundaries: Dict[str, int]) -> List[Experience]:
+    """Extract work experience with robust pattern matching."""
+    section_lines = _get_section_lines(lines, boundaries, "experience")
+    if not section_lines:
+        return []
 
-def _extract_skills(text: str, lines: List[str]) -> Dict[str, List[str]]:
-    """Extract technical skills organized by category."""
-    skills_dict: Dict[str, List[str]] = {}
-    
-    # Find skills section
-    skills_start = -1
-    for i, line in enumerate(lines):
-        if re.search(r'(technical\s+)?skills?', line, re.IGNORECASE):
-            skills_start = i
-            break
-    
-    if skills_start == -1:
-        return skills_dict
-    
-    current_category = "General"
-    for i in range(skills_start + 1, min(skills_start + 30, len(lines))):
-        line = lines[i]
-        
-        # Check if we've hit the next major section
-        if re.search(r'(experience|projects|certifications|education)', line, re.IGNORECASE):
-            break
-        
-        # Check if this is a category header (bold, all caps, or followed by colon)
-        if re.match(r'^[A-Z][\w\s&]+:', line) or (line.isupper() and len(line.split()) <= 3):
-            category = line.rstrip(':').strip()
-            current_category = category
-            skills_dict[current_category] = []
-        else:
-            # Extract skills from this line (comma or pipe separated)
-            if current_category not in skills_dict:
-                skills_dict[current_category] = []
-            
-            # Split by comma, semicolon, or pipe
-            skill_items = re.split(r'[,;|]', line)
-            for item in skill_items:
-                skill = item.strip()
-                if skill and len(skill) > 1:
-                    skills_dict[current_category].append(skill)
-    
-    return skills_dict
-
-
-def _extract_experience(text: str, lines: List[str]) -> List[Experience]:
-    """Extract work experience."""
     experience_list = []
-    
-    # Find experience section
-    experience_start = -1
-    for i, line in enumerate(lines):
-        if re.search(r'(work\s+)?experience|employment|professional\s+experience', line, re.IGNORECASE):
-            experience_start = i
-            break
-    
-    if experience_start == -1:
-        return experience_list
-    
-    current_experience = None
-    bullets = []
-    
-    for i in range(experience_start + 1, min(experience_start + 50, len(lines))):
-        line = lines[i]
-        
-        # Check if we've hit the next major section
-        if re.search(r'(projects|certifications|education|skills)', line, re.IGNORECASE):
-            if current_experience:
-                current_experience.bullets = bullets
-                experience_list.append(current_experience)
-            break
-        
-        # Look for job title patterns (usually title at company or title | company)
-        title_company_match = re.search(
-            r'^([A-Z][\w\s&/]+)\s+(?:at|@|\|)\s+([A-Z][\w\s&]+)',
+    current: Optional[Experience] = None
+    bullets: List[str] = []
+    multi_line_bullet = ""  # accumulator for bullets that wrap across lines
+
+    for line in section_lines:
+        # Try to match a job title line: "Title | Company  Date"
+        # Patterns: "Software Engineer | Oracle  May 2025 – Present"
+        #           "Software Engineer at Oracle"
+        #           "Software Engineer, Oracle"
+        title_match = re.match(
+            r'^([A-Z][\w\s/&-]+?)\s*[|,]\s*([A-Z][\w\s&.-]+?)(?:\s{2,}|\s*[|]\s*|\s+)((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\w\s–\-]+(?:Present|\d{4}))?\s*$',
             line
         )
-        
-        if title_company_match:
-            if current_experience:
-                current_experience.bullets = bullets
-                experience_list.append(current_experience)
-            
-            title = title_company_match.group(1).strip()
-            company = title_company_match.group(2).strip()
-            current_experience = Experience(
-                title=title,
-                company=company,
-                dates="",
-                bullets=[]
+        if not title_match:
+            # Try: "Title at Company"
+            title_match = re.match(
+                r'^([A-Z][\w\s/&-]+?)\s+(?:at|@)\s+([A-Z][\w\s&.-]+)',
+                line
             )
+
+        if title_match:
+            # Save previous experience
+            if current:
+                if multi_line_bullet:
+                    bullets.append(multi_line_bullet.strip())
+                    multi_line_bullet = ""
+                current.bullets = bullets
+                experience_list.append(current)
+
+            title = title_match.group(1).strip()
+            company = title_match.group(2).strip()
+            dates = title_match.group(3).strip() if title_match.lastindex and title_match.lastindex >= 3 and title_match.group(3) else ""
+
+            current = Experience(title=title, company=company, dates=dates, bullets=[])
             bullets = []
-        elif current_experience:
-            # Extract dates
-            date_match = re.search(r'(\w+\s+\d{4})\s*[-–]\s*(\w+\s+\d{4}|Present|Current)', line)
+            continue
+
+        # If we have a current experience, look for dates on their own line
+        if current and not current.dates:
+            date_match = re.search(
+                r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\.?\s+\d{4})\s*[-–—]\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\.?\s+\d{4}|Present|Current)',
+                line, re.IGNORECASE
+            )
             if date_match:
-                current_experience.dates = date_match.group(0)
-            
-            # Extract bullet points (lines starting with •, -, *, or indented)
-            if re.match(r'^[•\-\*]\s+', line) or line.startswith('  '):
-                bullet = re.sub(r'^[•\-\*]\s+', '', line).strip()
-                if bullet:
-                    bullets.append(bullet)
-    
-    if current_experience:
-        current_experience.bullets = bullets
-        experience_list.append(current_experience)
-    
+                current.dates = date_match.group(0)
+                continue
+
+        # Bullet points
+        if current:
+            bullet_match = re.match(r'^[•\-\*◦▪►]\s*(.*)', line)
+            if bullet_match:
+                # Start of a new bullet
+                if multi_line_bullet:
+                    bullets.append(multi_line_bullet.strip())
+                multi_line_bullet = bullet_match.group(1).strip()
+            elif multi_line_bullet and line and not line[0].isupper():
+                # Continuation of a wrapped bullet (starts lowercase)
+                multi_line_bullet += " " + line
+            elif multi_line_bullet and line:
+                # Could be a continuation of a bullet that wraps to a new line
+                # Check if it looks like a continuation (doesn't start a new entry)
+                if not re.match(r'^[A-Z][\w\s/&-]+?\s*[|,@]', line):
+                    multi_line_bullet += " " + line
+                else:
+                    bullets.append(multi_line_bullet.strip())
+                    multi_line_bullet = ""
+
+    # Flush last experience
+    if current:
+        if multi_line_bullet:
+            bullets.append(multi_line_bullet.strip())
+        current.bullets = bullets
+        experience_list.append(current)
+
     return experience_list
 
 
-def _extract_projects(text: str, lines: List[str]) -> List[Project]:
+# ═══════════════════════════════════════════════════════════
+# Education Extraction
+# ═══════════════════════════════════════════════════════════
+
+def _extract_education(lines: List[str], boundaries: Dict[str, int]) -> List[Education]:
+    """Extract education entries."""
+    section_lines = _get_section_lines(lines, boundaries, "education")
+    if not section_lines:
+        return []
+
+    education_list = []
+    current: Optional[Education] = None
+
+    for line in section_lines:
+        # Match degree patterns
+        # "Master's in Computer Science — Florida Institute of Technology, Melbourne, FL (2024)"
+        # "Bachelor of Science in CS, University Name, 2020"
+        degree_match = re.search(
+            r"(Master'?s?|Bachelor'?s?|PhD|Ph\.D\.?|Doctorate|Associate'?s?|B\.S\.?|M\.S\.?|B\.A\.?|M\.A\.?|MBA)"
+            r"(?:\s+(?:of|in|degree\s+in))?\s*([\w\s&/,]+)",
+            line, re.IGNORECASE
+        )
+
+        if degree_match:
+            if current:
+                education_list.append(current)
+
+            degree_type = degree_match.group(1)
+            rest = degree_match.group(2).strip() if degree_match.group(2) else ""
+
+            # Try to split "Computer Science — University Name, City, State (Year)"
+            parts = re.split(r'\s*[—–-]\s*', rest, maxsplit=1)
+            major = parts[0].strip().rstrip(",")
+            university = ""
+            location = ""
+            dates = ""
+
+            if len(parts) > 1:
+                uni_part = parts[1]
+                # Extract year in parens
+                year_match = re.search(r'\((\d{4})\)', uni_part)
+                if year_match:
+                    dates = year_match.group(1)
+                    uni_part = uni_part[:year_match.start()].strip().rstrip(",")
+
+                # Extract location (last "City, ST" pattern)
+                loc_match = re.search(r',\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),?\s*([A-Z]{2})?\s*$', uni_part)
+                if loc_match:
+                    location = loc_match.group(0).strip().lstrip(",").strip()
+                    uni_part = uni_part[:loc_match.start()].strip().rstrip(",")
+
+                university = uni_part.strip()
+
+            current = Education(
+                degree=f"{degree_type} in {major}" if major else degree_type,
+                university=university,
+                location=location,
+                dates=dates,
+                gpa="",
+                coursework=[]
+            )
+            continue
+
+        if current:
+            # GPA
+            gpa_match = re.search(r'GPA[:\s]+([\d.]+)', line, re.IGNORECASE)
+            if gpa_match:
+                current.gpa = gpa_match.group(1)
+
+            # Coursework
+            if re.search(r'coursework|courses', line, re.IGNORECASE):
+                # Extract items after the colon
+                coursework_text = re.sub(r'.*(?:coursework|courses)\s*:?\s*', '', line, flags=re.IGNORECASE)
+                if coursework_text:
+                    items = [c.strip() for c in re.split(r'[,;•]', coursework_text) if c.strip()]
+                    current.coursework = items
+
+            # Dates on own line
+            if not current.dates:
+                date_match = re.search(r'(\d{4})\s*[-–—]\s*(\d{4}|Present)', line)
+                if date_match:
+                    current.dates = date_match.group(0)
+
+    if current:
+        education_list.append(current)
+
+    return education_list
+
+
+# ═══════════════════════════════════════════════════════════
+# Skills Extraction
+# ═══════════════════════════════════════════════════════════
+
+def _extract_skills(lines: List[str], boundaries: Dict[str, int]) -> Dict[str, List[str]]:
+    """Extract skills organized by category."""
+    section_lines = _get_section_lines(lines, boundaries, "skills")
+    if not section_lines:
+        return {}
+
+    skills_dict: Dict[str, List[str]] = {}
+    full_text = " ".join(section_lines)
+
+    # Pattern: "Category: skill1, skill2, skill3"
+    # Handle multi-line by joining with bullet separators
+    # Common patterns:
+    #   "Languages: Python, Java, JavaScript, TypeScript, SQL • Backend: FastAPI, Spring Boot"
+    #   "Languages: Python, Java\nFrameworks: FastAPI, Spring Boot"
+
+    # Split on "Category:" patterns
+    segments = re.split(r'(?:^|\s*[•|]\s*)([A-Z][\w/&\s]+?):\s*', full_text)
+    # segments = ['', 'Category1', 'skills...', 'Category2', 'skills...', ...]
+
+    if len(segments) >= 3:
+        for i in range(1, len(segments), 2):
+            category = segments[i].strip()
+            if i + 1 < len(segments):
+                raw_skills = segments[i + 1].strip()
+                # Split by comma, semicolon
+                items = [s.strip().rstrip("•").strip() for s in re.split(r'[,;]', raw_skills) if s.strip()]
+                # Filter out empty or too-short items
+                items = [s for s in items if len(s) > 1 and not re.match(r'^[•|]\s*$', s)]
+                if items:
+                    skills_dict[category] = items
+    else:
+        # Fallback: line-by-line
+        current_category = "General"
+        for line in section_lines:
+            cat_match = re.match(r'^([A-Z][\w/&\s]+?):\s*(.*)', line)
+            if cat_match:
+                current_category = cat_match.group(1).strip()
+                rest = cat_match.group(2).strip()
+                items = [s.strip() for s in re.split(r'[,;|]', rest) if s.strip() and len(s.strip()) > 1]
+                skills_dict[current_category] = items
+            else:
+                items = [s.strip() for s in re.split(r'[,;|]', line) if s.strip() and len(s.strip()) > 1]
+                if items:
+                    if current_category not in skills_dict:
+                        skills_dict[current_category] = []
+                    skills_dict[current_category].extend(items)
+
+    return skills_dict
+
+
+# ═══════════════════════════════════════════════════════════
+# Projects Extraction
+# ═══════════════════════════════════════════════════════════
+
+def _extract_projects(lines: List[str], boundaries: Dict[str, int]) -> List[Project]:
     """Extract projects."""
-    projects_list = []
-    
-    # Find projects section
-    projects_start = -1
-    for i, line in enumerate(lines):
-        if re.search(r'projects?', line, re.IGNORECASE):
-            projects_start = i
-            break
-    
-    if projects_start == -1:
-        return projects_list
-    
-    current_project = None
-    
-    for i in range(projects_start + 1, min(projects_start + 40, len(lines))):
-        line = lines[i]
-        
-        # Check if we've hit the next major section
-        if re.search(r'(certifications|education|skills|experience)', line, re.IGNORECASE):
-            if current_project:
-                projects_list.append(current_project)
-            break
-        
-        # Look for project name (usually bold or title case, may have parentheses)
-        project_match = re.search(r'^([A-Z][\w\s&/]+(?:\([^)]+\))?)', line)
-        
-        if project_match and len(line.split()) <= 8:
-            if current_project:
-                projects_list.append(current_project)
-            
-            project_name = project_match.group(1).strip()
-            current_project = Project(
-                name=project_name,
-                description="",
+    section_lines = _get_section_lines(lines, boundaries, "projects")
+    if not section_lines:
+        return []
+
+    projects_list: List[Project] = []
+    current: Optional[Project] = None
+    description_parts: List[str] = []
+
+    for line in section_lines:
+        # Project header: starts with a name (bold/title), often has a dash or URL
+        # "Health-scan — AI healthcare assistant for prescription analysis (healthscan.app)"
+        # "Blinds & Boundaries — AI-powered virtual try-on"
+        project_header = re.match(
+            r'^([A-Z][\w\s&-]+?)(?:\s*[—–-]\s*(.+))?$',
+            line
+        )
+
+        is_bullet = re.match(r'^[•\-\*◦▪►]', line)
+        is_header = (
+            project_header
+            and not is_bullet
+            and len(line.split()) <= 15
+            and not line.startswith(" ")
+        )
+
+        if is_header and project_header:
+            # Save previous project
+            if current:
+                current.description = " ".join(description_parts).strip()
+                projects_list.append(current)
+                description_parts = []
+
+            name = project_header.group(1).strip()
+            subtitle = project_header.group(2).strip() if project_header.group(2) else ""
+
+            # Extract URL from subtitle
+            url_match = re.search(r'\(([a-z][\w.-]+\.[a-z]{2,})\)', subtitle)
+            url = url_match.group(1) if url_match else ""
+            if url:
+                subtitle = subtitle[:url_match.start()].strip()
+
+            current = Project(
+                name=name,
+                description=subtitle,
                 technologies=[],
                 category=""
             )
-        elif current_project:
-            # Extract technologies (look for tech keywords or parentheses)
-            tech_match = re.search(r'\(([^)]+)\)', line)
-            if tech_match:
-                techs = [t.strip() for t in tech_match.group(1).split(',')]
-                current_project.technologies.extend(techs)
-            
-            # Extract description (bullet points or paragraphs)
-            if re.match(r'^[•\-\*]\s+', line) or (len(line) > 20 and not line.isupper()):
-                desc = re.sub(r'^[•\-\*]\s+', '', line).strip()
-                if desc:
-                    if current_project.description:
-                        current_project.description += " " + desc
-                    else:
-                        current_project.description = desc
-    
-    if current_project:
-        projects_list.append(current_project)
-    
+        elif current:
+            # Bullet or continuation
+            clean = re.sub(r'^[•\-\*◦▪►]\s*', '', line).strip()
+            if clean:
+                description_parts.append(clean)
+                # Extract techs from parentheses
+                tech_matches = re.findall(r'(?:using|with|built\s+with|technologies?:)\s+([^.]+?)(?:\.|$)', clean, re.IGNORECASE)
+                for tm in tech_matches:
+                    techs = [t.strip() for t in re.split(r'[,+]', tm) if t.strip() and len(t.strip()) > 1]
+                    current.technologies.extend(techs)
+
+    if current:
+        current.description = " ".join(description_parts).strip()
+        projects_list.append(current)
+
     return projects_list
 
 
-def _extract_certifications(text: str, lines: List[str]) -> List[Certification]:
+# ═══════════════════════════════════════════════════════════
+# Certifications Extraction
+# ═══════════════════════════════════════════════════════════
+
+def _extract_certifications(lines: List[str], boundaries: Dict[str, int]) -> List[Certification]:
     """Extract certifications."""
-    certifications_list = []
-    
-    # Find certifications section
-    cert_start = -1
-    for i, line in enumerate(lines):
-        if re.search(r'certifications?', line, re.IGNORECASE):
-            cert_start = i
-            break
-    
-    if cert_start == -1:
-        return certifications_list
-    
-    for i in range(cert_start + 1, min(cert_start + 20, len(lines))):
-        line = lines[i]
-        
-        # Check if we've hit the next major section
-        if re.search(r'(education|skills|experience|projects)', line, re.IGNORECASE):
-            break
-        
-        # Look for certification patterns
-        cert_match = re.search(r'([A-Z][\w\s&/]+(?:Certified|Certification|Associate|Professional))', line)
-        if cert_match:
-            cert_name = cert_match.group(1).strip()
-            
-            # Extract year if present
-            year_match = re.search(r'\((\d{4})\)', line)
-            year = year_match.group(1) if year_match else ""
-            
-            certifications_list.append(Certification(
-                name=cert_name,
-                issuer="",
-                year=year
-            ))
-    
+    section_lines = _get_section_lines(lines, boundaries, "certifications")
+    if not section_lines:
+        return []
+
+    certifications_list: List[Certification] = []
+
+    for line in section_lines:
+        clean = re.sub(r'^[•\-\*◦▪►]\s*', '', line).strip()
+        if not clean or len(clean) < 5:
+            continue
+
+        # Extract year
+        year_match = re.search(r'\(?(\d{4})\)?', clean)
+        year = year_match.group(1) if year_match else ""
+
+        # Try to split "Name | Issuer" or "Name – Issuer" or "Name, Issuer"
+        parts = re.split(r'\s*[|–—]\s*', clean)
+        name = parts[0].strip()
+        issuer = parts[1].strip() if len(parts) > 1 else ""
+
+        # Clean up: remove "View Credential" etc.
+        name = re.sub(r'\s*\|?\s*View\s+Credential.*', '', name, flags=re.IGNORECASE).strip()
+        issuer = re.sub(r'\s*\|?\s*View\s+Credential.*', '', issuer, flags=re.IGNORECASE).strip()
+
+        if name:
+            certifications_list.append(Certification(name=name, issuer=issuer, year=year))
+
     return certifications_list
 
