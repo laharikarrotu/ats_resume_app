@@ -18,10 +18,12 @@ from fastapi.responses import FileResponse
 
 from ..config import OUTPUT_DIR
 from ..models import JobDescriptionRequest, ResumeResponse, ResumeVersion
+from ..exceptions import LLMProviderError, SessionNotFoundError
 from ..llm.client_async import extract_keywords_async
 from ..core.resume_generator import generate_resume
 from ..core.ats_validator import validate_docx_file, validate_pdf_file
 from ..metrics import metrics
+from ..logger import logger
 from ..db import save_generation
 from .deps import get_resume_data, has_session, resume_versions, analysis_cache
 
@@ -56,11 +58,17 @@ async def create_resume(
     """Generate a tailored ATS-optimized resume."""
     use_fast_mode = fast_mode.lower() == "true"
     metrics.inc("resume_generations_total", labels={"format": output_format})
-    with metrics.timer("llm_keyword_extraction_seconds"):
-        if OPTIMIZED_AVAILABLE:
-            keywords = await extract_keywords_async_optimized(job_description, use_cache=True)
-        else:
-            keywords = await extract_keywords_async(job_description)
+
+    # Extract keywords — gracefully handle LLM failures
+    keywords = []
+    try:
+        with metrics.timer("llm_keyword_extraction_seconds"):
+            if OPTIMIZED_AVAILABLE:
+                keywords = await extract_keywords_async_optimized(job_description, use_cache=True)
+            else:
+                keywords = await extract_keywords_async(job_description)
+    except Exception as exc:
+        logger.warning("LLM keyword extraction failed during generation, continuing: %s", exc)
 
     resume_data = None
     if session_id:

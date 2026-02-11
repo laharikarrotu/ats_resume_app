@@ -8,9 +8,51 @@ import {
   AlertCircle,
   Type,
   Loader2,
+  ClipboardCopy,
 } from "lucide-react";
 import { uploadResumeFile, uploadResumeText } from "../api/client";
 import type { UploadResponse } from "../types";
+
+const RESUME_TEMPLATE = `Full Name
+email@example.com | (123) 456-7890 | linkedin.com/in/yourname | github.com/yourname
+City, State
+
+EDUCATION
+Degree Name, University Name, City, State, Start Year - End Year
+GPA: 3.8/4.0
+Relevant Coursework: Course 1, Course 2, Course 3
+
+SKILLS
+Languages: Python, Java, JavaScript, TypeScript, SQL
+Backend: FastAPI, Spring Boot, Node.js, Django
+Frontend: React, Redux, Angular, HTML, CSS
+Cloud: AWS, GCP, Azure, Docker, Kubernetes
+Databases: PostgreSQL, MongoDB, Redis
+Tools: Git, Jenkins, Terraform, Jira
+
+WORK EXPERIENCE
+Job Title, Company Name, City, State, Month Year - Present
+- Led development of microservices platform handling 50M+ daily requests using Kubernetes
+- Reduced API response time by 40% through Redis caching and query optimization
+- Mentored 5 junior engineers and conducted 100+ code reviews
+
+Job Title, Company Name, City, State, Month Year - Month Year
+- Built real-time notification system serving 2B+ users using React and GraphQL
+- Optimized database queries reducing p99 latency from 3s to 800ms
+
+PROJECTS
+Project Name | Tech1, Tech2, Tech3
+- Built full-stack web application with 99.9% uptime serving 10K+ users
+- Integrated ML model for real-time predictions with 94% accuracy
+
+Project Name | Tech1, Tech2
+- Description of what you built and the impact it had
+- Metrics: users served, performance improvements, cost savings
+
+CERTIFICATIONS
+Certification Name, Issuing Organization, Year
+Another Certification, Issuing Organization, Year`;
+
 
 interface Props {
   onUploaded: (data: UploadResponse) => void;
@@ -166,29 +208,49 @@ export default function FileUpload({
         </div>
       ) : (
         /* Text paste */
-        <div className="space-y-4">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-500">
+              Use the format below for best results — or paste your own
+            </p>
+            <button
+              onClick={() => setPasteText(RESUME_TEMPLATE)}
+              className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium transition-colors"
+              title="Load sample format"
+            >
+              <ClipboardCopy className="size-3" />
+              Use Template
+            </button>
+          </div>
           <textarea
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
-            placeholder="Paste your resume text here…"
-            rows={10}
-            className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 focus:border-primary-300 resize-y placeholder:text-slate-400"
+            placeholder={`Paste your resume text here — use this format for best parsing:\n\nFull Name\nemail@example.com | (123) 456-7890 | City, State\n\nEDUCATION\nDegree, University, Start - End\n\nSKILLS\nLanguages: Python, Java, JavaScript\nCloud: AWS, Docker, Kubernetes\n\nWORK EXPERIENCE\nJob Title, Company, Month Year - Present\n- Achievement with metrics (e.g., increased throughput by 40%)\n- Another bullet point with impact\n\nPROJECTS\nProject Name | Tech1, Tech2, Tech3\n- What you built and the impact\n\nCERTIFICATIONS\nCert Name, Issuer, Year`}
+            rows={14}
+            className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary-300 focus:border-primary-300 resize-y placeholder:text-slate-400 placeholder:font-sans"
           />
-          <button
-            onClick={handleTextSubmit}
-            disabled={loading || !pasteText.trim()}
-            className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-primary-600 text-white font-medium text-sm hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="size-4 animate-spin" /> Parsing…
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="size-4" /> Parse Resume
-              </>
+          <div className="flex items-center justify-between">
+            <button
+              onClick={handleTextSubmit}
+              disabled={loading || !pasteText.trim()}
+              className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-primary-600 text-white font-medium text-sm hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Parsing…
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="size-4" /> Parse Resume
+                </>
+              )}
+            </button>
+            {pasteText.trim() && (
+              <span className="text-xs text-slate-400">
+                {pasteText.split(/\n/).filter(Boolean).length} lines
+              </span>
             )}
-          </button>
+          </div>
         </div>
       )}
 

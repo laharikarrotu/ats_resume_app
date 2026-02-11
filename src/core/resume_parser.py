@@ -92,19 +92,53 @@ def parse_resume_from_text(text: str) -> ResumeData:
 
 
 def _parse_text(text: str) -> ResumeData:
-    """Route text through LLM parser (if available) or basic regex parser."""
+    """
+    Smart hybrid parser — regex first (free + instant), LLM only when needed.
+
+    Strategy:
+      1. Always run the regex parser first (zero cost, <50ms)
+      2. If result looks complete (has name + experience + skills), return it
+      3. If result is sparse/incomplete, escalate to LLM for better extraction
+    This saves LLM quota for the rewriting step where it matters most.
+    """
+    # Step 1: Try regex parser first (always free)
+    regex_result = _parse_text_to_resume_data(text)
+
+    # Step 2: Check quality — if regex did a good job, skip LLM
+    has_name = regex_result.name and regex_result.name != "Your Name"
+    has_experience = len(regex_result.experience) > 0
+    has_skills = any(len(v) > 0 for v in regex_result.skills.values())
+    has_education = len(regex_result.education) > 0
+    has_bullets = any(len(exp.bullets) > 0 for exp in regex_result.experience) if has_experience else False
+
+    quality_score = sum([has_name, has_experience, has_skills, has_education])
+
+    # Must have experience with bullets to skip LLM — experience is the most important section
+    if quality_score >= 3 and has_experience and has_bullets:
+        # Regex did well — no need to spend LLM quota
+        logger.info(
+            "Regex parser sufficient (quality=%d/4): %s, %d exp, %d projects, %d skills",
+            quality_score, regex_result.name, len(regex_result.experience),
+            len(regex_result.projects), sum(len(v) for v in regex_result.skills.values()),
+        )
+        return regex_result
+
+    # Step 3: Regex result is sparse — use LLM for better extraction
     if LLM_PARSER_AVAILABLE:
         try:
-            result = parse_resume_with_llm(text)
-            logger.info("LLM parser succeeded: %s, %d exp, %d projects",
-                        result.name, len(result.experience), len(result.projects))
-            return result
+            llm_result = parse_resume_with_llm(text)
+            logger.info(
+                "LLM parser used (regex quality=%d/4): %s, %d exp, %d projects",
+                quality_score, llm_result.name, len(llm_result.experience),
+                len(llm_result.projects),
+            )
+            return llm_result
         except Exception as e:
-            logger.warning("LLM parser failed: %s — falling back to regex parser", e)
-            return _parse_text_to_resume_data(text)
+            logger.warning("LLM parser failed: %s — using regex result", e)
+            return regex_result
     else:
-        logger.info("LLM parser not available, using regex parser")
-        return _parse_text_to_resume_data(text)
+        logger.info("LLM parser not available, using regex result (quality=%d/4)", quality_score)
+        return regex_result
 
 
 def _extract_text_from_txt(file_path: str) -> str:
@@ -138,10 +172,10 @@ def _find_section_boundaries(lines: List[str]) -> Dict[str, int]:
     Returns a dict like {'experience': 5, 'education': 30, 'skills': 35, ...}
     """
     section_patterns = {
-        "experience": r"^(?:work\s+)?experience|^employment|^professional\s+experience",
+        "experience": r"^(?:work\s+)?experience|^employment|^professional\s+experience|^relevant\s+experience",
         "education": r"^education",
         "skills": r"^(?:technical\s+)?skills?$",
-        "projects": r"^projects?$",
+        "projects": r"^(?:personal\s+|academic\s+|side\s+|key\s+|selected\s+|relevant\s+|notable\s+)?projects?(?:\s*(?:&|and)\s*\w+)?$",
         "certifications": r"^certifications?|^licenses?\s*(?:&|and)?\s*certifications?",
         "summary": r"^(?:professional\s+)?summary|^objective|^profile",
     }
@@ -158,7 +192,7 @@ def _get_section_lines(lines: List[str], boundaries: Dict[str, int], section: st
     """Get all lines belonging to a section (from its header to the next section header)."""
     if section not in boundaries:
         return []
-    start = boundaries[section] + 1  # skip the header line itself
+    start = max(0, boundaries[section] + 1)  # skip the header/boundary line; clamp to 0
     # Find the next section that starts after this one
     all_starts = sorted(boundaries.values())
     idx = all_starts.index(boundaries[section])
@@ -166,16 +200,140 @@ def _get_section_lines(lines: List[str], boundaries: Dict[str, int], section: st
     return lines[start:end]
 
 
+def _classify_line(line: str) -> Optional[str]:
+    """
+    Classify a single line by its content pattern — independent of section headers.
+
+    Returns one of: 'contact', 'education', 'experience_header', 'bullet',
+    'skill', 'project_header', 'certification', 'section_header', or None.
+    """
+    stripped = line.strip()
+    if not stripped:
+        return None
+
+    # ── Section headers (explicit labels like "EDUCATION", "WORK EXPERIENCE") ──
+    section_kw = re.match(
+        r'^(?:work\s+)?experience$|^education$|^(?:technical\s+)?skills?$|'
+        r'^(?:personal\s+|academic\s+|key\s+|selected\s+)?projects?(?:\s*(?:&|and)\s*\w+)?$|'
+        r'^certifications?$|^(?:professional\s+)?summary$|^objective$',
+        stripped, re.IGNORECASE,
+    )
+    if section_kw:
+        return "section_header"
+
+    # ── Contact line (email, phone, linkedin, url combos) ──
+    email_pat = re.search(r'[\w.-]+@[\w.-]+\.\w+', stripped)
+    phone_pat = re.search(r'\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}', stripped)
+    if email_pat or phone_pat:
+        return "contact"
+
+    # ── Bullet point ──
+    if re.match(r'^[•\-\*◦▪►]\s+', stripped):
+        return "bullet"
+
+    # ── Skill line ("Category: item1, item2, item3") ──
+    if re.match(r'^[\w\s/&]+:\s*\w+.*,\s*\w+', stripped):
+        return "skill"
+
+    # ── Education-like ("degree ... university" or "university ... degree") ──
+    edu_keywords = r'(?:bachelor|master|b\.?s\.?|m\.?s\.?|ph\.?d|associate|diploma|degree|university|college|institute)'
+    if re.search(edu_keywords, stripped, re.IGNORECASE):
+        return "education"
+
+    # ── Certification-like ("AWS Certified", "Google Cloud", etc.) ──
+    cert_keywords = r'(?:certified|certification|certificate|license|credential|aws\s+solutions|google\s+cloud|azure|pmp|comptia|cisco)'
+    if re.search(cert_keywords, stripped, re.IGNORECASE) and len(stripped.split()) <= 15:
+        return "certification"
+
+    # ── Experience header (Title, Company, Date pattern) ──
+    date_pat = r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\.?\s+\d{4}|Present|Current|\d{4}\s*[-–—]\s*(?:\d{4}|Present)'
+    if re.search(date_pat, stripped, re.IGNORECASE) and len(stripped.split()) <= 20:
+        # Could be experience or education — if it has a company-like pattern, it's experience
+        if re.search(r'[|,]\s*[A-Z]', stripped):
+            return "experience_header"
+        return "experience_header"  # default to experience for date lines
+
+    # ── Project header (Name | Tech or Name — description) ──
+    if re.match(r'^[A-Z][\w\s&\'-]+\s*\|\s*', stripped):
+        return "project_header"
+    if re.match(r'^[A-Z][\w\s&\'-]+\s*[—–]\s*', stripped) and len(stripped.split()) <= 15:
+        return "project_header"
+
+    return None
+
+
+def _smart_section_boundaries(lines: List[str], boundaries: Dict[str, int]) -> Dict[str, int]:
+    """
+    Enhance section boundaries by analyzing line content patterns.
+
+    If a section wasn't detected by header matching, scan through unassigned
+    lines looking for content that reveals the section type.
+
+    Boundary convention: boundary points to the line BEFORE the first content
+    line, so _get_section_lines(start = boundary + 1) includes the content.
+    When a real header exists, the header IS the boundary line.
+    When no header exists, we use (first_content_line - 1) as a virtual boundary.
+    """
+    missing_sections = [
+        s for s in ["experience", "education", "skills", "projects", "certifications"]
+        if s not in boundaries
+    ]
+    if not missing_sections:
+        return boundaries
+
+    assigned_starts = set(boundaries.values())
+
+    for i, line in enumerate(lines):
+        if i in assigned_starts:
+            continue
+
+        classification = _classify_line(line)
+        if not classification or classification in ("section_header", "contact", "bullet"):
+            continue
+
+        # Determine the section this line belongs to
+        section = None
+        if classification == "experience_header" and "experience" not in boundaries:
+            section = "experience"
+        elif classification == "education" and "education" not in boundaries:
+            section = "education"
+        elif classification == "skill" and "skills" not in boundaries:
+            section = "skills"
+        elif classification == "project_header" and "projects" not in boundaries:
+            section = "projects"
+        elif classification == "certification" and "certifications" not in boundaries:
+            section = "certifications"
+
+        if section:
+            # If previous line is a section header label, use it as the boundary
+            if i > 0 and _classify_line(lines[i - 1]) == "section_header":
+                boundaries[section] = i - 1
+            else:
+                # No header — set boundary to (i - 1) so _get_section_lines includes line i
+                # Use -1 if i == 0; _get_section_lines handles max(0, ...) via start calc
+                boundaries[section] = i - 1
+            assigned_starts.add(boundaries[section])
+
+    return boundaries
+
+
 def _parse_text_to_resume_data(text: str) -> ResumeData:
     """
     Parse extracted text into structured ResumeData using robust regex patterns.
     This is the fallback parser when LLM is unavailable.
+
+    Uses a two-pass approach:
+      1. Header-based section detection (fast, exact)
+      2. Content-based line classification (smart, fills gaps)
     """
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     full_text = '\n'.join(lines)
 
-    # Find section boundaries first
+    # Pass 1: Find section boundaries by headers
     boundaries = _find_section_boundaries(lines)
+
+    # Pass 2: Smart fill — if sections are missing, classify lines by content
+    boundaries = _smart_section_boundaries(lines, boundaries)
 
     # Extract contact information
     name = _extract_name(lines, boundaries)
@@ -185,7 +343,7 @@ def _parse_text_to_resume_data(text: str) -> ResumeData:
     github = _extract_github(full_text)
     location = _extract_location(full_text)
 
-    # Extract sections using boundaries
+    # Extract sections using enhanced boundaries
     education = _extract_education(lines, boundaries)
     skills = _extract_skills(lines, boundaries)
     experience = _extract_experience(lines, boundaries)
@@ -302,16 +460,27 @@ def _extract_experience(lines: List[str], boundaries: Dict[str, int]) -> List[Ex
     multi_line_bullet = ""  # accumulator for bullets that wrap across lines
 
     for line in section_lines:
-        # Try to match a job title line: "Title | Company  Date"
-        # Patterns: "Software Engineer | Oracle  May 2025 – Present"
-        #           "Software Engineer at Oracle"
-        #           "Software Engineer, Oracle"
+        # Try to match a job title line in common formats:
+        #   "Software Engineer | Oracle  May 2025 – Present"
+        #   "Software Engineer, Google, Jul 2022 - Present"
+        #   "Software Engineer, Google, Mountain View, CA, Jul 2022 - Present"
+        #   "Software Engineer at Oracle"
+
+        # Format 1: "Title [|,] Company [|,spaces] Date"
         title_match = re.match(
-            r'^([A-Z][\w\s/&-]+?)\s*[|,]\s*([A-Z][\w\s&.-]+?)(?:\s{2,}|\s*[|]\s*|\s+)((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\w\s–\-]+(?:Present|\d{4}))?\s*$',
+            r'^([A-Z][\w\s/&-]+?)\s*[|,]\s*([A-Z][\w\s&.-]+?)(?:\s{2,}|\s*[|,]\s*|\s+)((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\w\s–\-]+(?:Present|\d{4}))?\s*$',
             line
         )
         if not title_match:
-            # Try: "Title at Company"
+            # Format 2: "Title, Company, Location, Date" (skip location)
+            title_match2 = re.match(
+                r'^([A-Z][\w\s/&-]+?)\s*,\s*([A-Z][\w\s&.-]+?)\s*,\s*(?:[A-Z][\w\s]+,\s*[A-Z]{2}\s*,?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\w\s–\-]+(?:Present|\d{4}))\s*$',
+                line, re.IGNORECASE
+            )
+            if title_match2:
+                title_match = title_match2
+        if not title_match:
+            # Format 3: "Title at Company"
             title_match = re.match(
                 r'^([A-Z][\w\s/&-]+?)\s+(?:at|@)\s+([A-Z][\w\s&.-]+)',
                 line
@@ -468,47 +637,46 @@ def _extract_education(lines: List[str], boundaries: Dict[str, int]) -> List[Edu
 # ═══════════════════════════════════════════════════════════
 
 def _extract_skills(lines: List[str], boundaries: Dict[str, int]) -> Dict[str, List[str]]:
-    """Extract skills organized by category."""
+    """
+    Extract skills organized by category.
+
+    Handles formats:
+      • "Languages: Python, Java, JavaScript"  (one category per line)
+      • "Languages: Python, Java • Cloud: AWS"  (multiple on one line)
+      • "Python, Java, JavaScript"              (no category)
+    """
     section_lines = _get_section_lines(lines, boundaries, "skills")
     if not section_lines:
         return {}
 
     skills_dict: Dict[str, List[str]] = {}
-    full_text = " ".join(section_lines)
+    current_category = "General"
 
-    # Pattern: "Category: skill1, skill2, skill3"
-    # Handle multi-line by joining with bullet separators
-    # Common patterns:
-    #   "Languages: Python, Java, JavaScript, TypeScript, SQL • Backend: FastAPI, Spring Boot"
-    #   "Languages: Python, Java\nFrameworks: FastAPI, Spring Boot"
+    for line in section_lines:
+        # Skip bullet-style lines (those belong to experience, not skills)
+        if re.match(r'^[•\-\*◦▪►]\s+', line):
+            continue
 
-    # Split on "Category:" patterns
-    segments = re.split(r'(?:^|\s*[•|]\s*)([A-Z][\w/&\s]+?):\s*', full_text)
-    # segments = ['', 'Category1', 'skills...', 'Category2', 'skills...', ...]
+        # Check if line has one or more "Category: items" patterns
+        # e.g., "Languages: Python, Java • Cloud: AWS, GCP"
+        cat_parts = re.split(r'(?:\s*[•|]\s+|\s{3,})(?=[A-Z][\w/&\s]+?:\s)', line)
 
-    if len(segments) >= 3:
-        for i in range(1, len(segments), 2):
-            category = segments[i].strip()
-            if i + 1 < len(segments):
-                raw_skills = segments[i + 1].strip()
-                # Split by comma, semicolon
-                items = [s.strip().rstrip("•").strip() for s in re.split(r'[,;]', raw_skills) if s.strip()]
-                # Filter out empty or too-short items
-                items = [s for s in items if len(s) > 1 and not re.match(r'^[•|]\s*$', s)]
-                if items:
-                    skills_dict[category] = items
-    else:
-        # Fallback: line-by-line
-        current_category = "General"
-        for line in section_lines:
-            cat_match = re.match(r'^([A-Z][\w/&\s]+?):\s*(.*)', line)
+        for part in cat_parts:
+            cat_match = re.match(r'^([A-Z][\w/&\s]+?):\s*(.*)', part.strip())
             if cat_match:
                 current_category = cat_match.group(1).strip()
-                rest = cat_match.group(2).strip()
-                items = [s.strip() for s in re.split(r'[,;|]', rest) if s.strip() and len(s.strip()) > 1]
-                skills_dict[current_category] = items
+                raw = cat_match.group(2).strip()
+                items = [s.strip() for s in re.split(r'[,;]', raw) if s.strip() and len(s.strip()) > 1]
+                # Filter out non-skill content
+                items = [s for s in items if not re.match(r'^[•|]\s*$', s)]
+                if items:
+                    if current_category in skills_dict:
+                        skills_dict[current_category].extend(items)
+                    else:
+                        skills_dict[current_category] = items
             else:
-                items = [s.strip() for s in re.split(r'[,;|]', line) if s.strip() and len(s.strip()) > 1]
+                # No category label — append to current category
+                items = [s.strip() for s in re.split(r'[,;|]', part.strip()) if s.strip() and len(s.strip()) > 1]
                 if items:
                     if current_category not in skills_dict:
                         skills_dict[current_category] = []
@@ -522,7 +690,15 @@ def _extract_skills(lines: List[str], boundaries: Dict[str, int]) -> Dict[str, L
 # ═══════════════════════════════════════════════════════════
 
 def _extract_projects(lines: List[str], boundaries: Dict[str, int]) -> List[Project]:
-    """Extract projects."""
+    """
+    Extract projects from the Projects section.
+
+    Handles common formats:
+      • "Project Name — subtitle (url.com)"
+      • "Project Name | Tech1, Tech2, Tech3"
+      • "Project Name  (Jan 2024 – Mar 2024)"
+      • Followed by bullet points describing the project
+    """
     section_lines = _get_section_lines(lines, boundaries, "projects")
     if not section_lines:
         return []
@@ -531,60 +707,97 @@ def _extract_projects(lines: List[str], boundaries: Dict[str, int]) -> List[Proj
     current: Optional[Project] = None
     description_parts: List[str] = []
 
-    for line in section_lines:
-        # Project header: starts with a name (bold/title), often has a dash or URL
-        # "Health-scan — AI healthcare assistant for prescription analysis (healthscan.app)"
-        # "Blinds & Boundaries — AI-powered virtual try-on"
-        project_header = re.match(
-            r'^([A-Z][\w\s&-]+?)(?:\s*[—–-]\s*(.+))?$',
-            line
-        )
-
-        is_bullet = re.match(r'^[•\-\*◦▪►]', line)
-        is_header = (
-            project_header
-            and not is_bullet
-            and len(line.split()) <= 15
-            and not line.startswith(" ")
-        )
-
-        if is_header and project_header:
-            # Save previous project
-            if current:
+    def _save_current():
+        """Flush the current project into the list."""
+        nonlocal current, description_parts
+        if current:
+            if description_parts:
                 current.description = " ".join(description_parts).strip()
-                projects_list.append(current)
-                description_parts = []
+            projects_list.append(current)
+            current = None
+            description_parts = []
 
-            name = project_header.group(1).strip()
-            subtitle = project_header.group(2).strip() if project_header.group(2) else ""
+    for line in section_lines:
+        is_bullet = bool(re.match(r'^[•\-\*◦▪►]', line))
 
-            # Extract URL from subtitle
-            url_match = re.search(r'\(([a-z][\w.-]+\.[a-z]{2,})\)', subtitle)
-            url = url_match.group(1) if url_match else ""
-            if url:
-                subtitle = subtitle[:url_match.start()].strip()
+        # ── Try to detect a project header line ──
+        # Format 1: "Name — subtitle" or "Name – subtitle" or "Name - subtitle"
+        header_dash = re.match(
+            r'^([A-Z][\w\s&\'-]+?)(?:\s*[—–|-]\s*(.+))?$', line
+        )
+        # Format 2: "Name | Tech1, Tech2" (pipe separated)
+        header_pipe = re.match(
+            r'^([A-Z][\w\s&\'-]+?)\s*\|\s*(.+)$', line
+        )
+        # Format 3: "Name  (dates)" or just "Name"
+        header_plain = re.match(
+            r'^([A-Z][\w\s&\'-]+?)(?:\s*\(([^)]+)\))?$', line
+        )
+
+        is_header = (
+            not is_bullet
+            and not line.startswith(" ")
+            and len(line.split()) <= 20
+            and (header_dash or header_pipe or header_plain)
+        )
+
+        if is_header:
+            _save_current()
+
+            technologies: List[str] = []
+            subtitle = ""
+
+            if header_pipe:
+                name = header_pipe.group(1).strip()
+                # Pipe part is usually tech list
+                tech_str = header_pipe.group(2).strip()
+                technologies = [t.strip() for t in re.split(r'[,;]', tech_str) if t.strip()]
+            elif header_dash and header_dash.group(2):
+                name = header_dash.group(1).strip()
+                subtitle = header_dash.group(2).strip()
+            elif header_plain:
+                name = header_plain.group(1).strip()
+                subtitle = header_plain.group(2).strip() if header_plain.group(2) else ""
+            else:
+                name = line.strip()
+
+            # Extract URL from subtitle/name
+            url = ""
+            url_match = re.search(r'\(?([a-z][\w.-]+\.[a-z]{2,})\)?', subtitle)
+            if url_match:
+                url = url_match.group(1)
+                subtitle = subtitle[:url_match.start()].strip().rstrip("(").strip()
+
+            # Extract techs from parenthesized list in subtitle
+            if not technologies and subtitle:
+                tech_paren = re.search(r'(?:using|with|built\s+with|tech(?:nologies)?:?)\s+(.+)', subtitle, re.IGNORECASE)
+                if tech_paren:
+                    technologies = [t.strip() for t in re.split(r'[,;+]', tech_paren.group(1)) if t.strip() and len(t.strip()) > 1]
+                    subtitle = subtitle[:tech_paren.start()].strip()
 
             current = Project(
                 name=name,
                 description=subtitle,
-                technologies=[],
+                technologies=technologies,
                 category=""
             )
         elif current:
-            # Bullet or continuation
+            # Bullet or continuation line — belongs to current project
             clean = re.sub(r'^[•\-\*◦▪►]\s*', '', line).strip()
             if clean:
                 description_parts.append(clean)
-                # Extract techs from parentheses
-                tech_matches = re.findall(r'(?:using|with|built\s+with|technologies?:)\s+([^.]+?)(?:\.|$)', clean, re.IGNORECASE)
+                # Extract technologies mentioned inline
+                tech_matches = re.findall(
+                    r'(?:using|with|built\s+with|technologies?:?|powered\s+by)\s+([^.]+?)(?:\.|$)',
+                    clean, re.IGNORECASE,
+                )
                 for tm in tech_matches:
-                    techs = [t.strip() for t in re.split(r'[,+]', tm) if t.strip() and len(t.strip()) > 1]
-                    current.technologies.extend(techs)
+                    techs = [t.strip() for t in re.split(r'[,;+]', tm) if t.strip() and len(t.strip()) > 1]
+                    for tech in techs:
+                        if tech not in current.technologies:
+                            current.technologies.append(tech)
 
-    if current:
-        current.description = " ".join(description_parts).strip()
-        projects_list.append(current)
-
+    _save_current()
     return projects_list
 
 

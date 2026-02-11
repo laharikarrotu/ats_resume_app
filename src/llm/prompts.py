@@ -80,8 +80,8 @@ Return a JSON object with this EXACT structure:
   "projects": [
     {{
       "name": "Project Name",
-      "description": "Full project description",
-      "technologies": ["Tech1", "Tech2"],
+      "description": "Combine ALL bullet points and descriptions into one comprehensive description. Include every detail, metric, and achievement mentioned.",
+      "technologies": ["Tech1", "Tech2", "Tech3"],
       "url": "project URL if present",
       "category": "Web/ML/Data/Mobile/etc."
     }}
@@ -98,7 +98,7 @@ Return a JSON object with this EXACT structure:
 CRITICAL PARSING RULES:
 1. Extract ALL education entries — do NOT skip any
 2. Extract ALL work experience with EVERY bullet point — NEVER truncate
-3. Extract ALL projects with full descriptions
+3. Extract ALL projects — combine ALL bullet points under each project into the "description" field as complete sentences separated by ". ". Extract every technology mentioned. Projects may appear after Experience, Education, or Skills sections — scan the ENTIRE resume.
 4. Organize skills into the correct categories (Languages, Backend, Frontend, Cloud, Databases, AI/ML, DevOps, Tools)
 5. Extract ALL certifications — the "issuer" is the certifying body (e.g., "Amazon Web Services (AWS)" for AWS certs, "Google" for GCP certs, "Microsoft" for Azure certs) — NOT link text like "View Credential"
 6. Preserve EXACT dates, names, numbers, metrics, and percentages
