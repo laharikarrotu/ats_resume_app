@@ -448,8 +448,66 @@ def _extract_location(text: str) -> Optional[str]:
 # Experience Extraction (most critical section)
 # ═══════════════════════════════════════════════════════════
 
+def _is_date_line(line: str) -> Optional[str]:
+    """Check if a line is primarily a date range. Returns the date string or None."""
+    patterns = [
+        # "May 2024 - Aug 2024", "Jan 2020 – Present"
+        r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\.?\s+\d{4})\s*[-–—]\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\.?\s+\d{4}|Present|Current)',
+        # "08/2023 - 05/2025", "2023 - Present"
+        r'(\d{1,2}/\d{4})\s*[-–—]\s*(\d{1,2}/\d{4}|Present|Current)',
+        r'(\d{4})\s*[-–—]\s*(\d{4}|Present|Current)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, line, re.IGNORECASE)
+        if match:
+            return match.group(0)
+    return None
+
+
+def _is_company_location_line(line: str) -> Optional[str]:
+    """Check if a line is a company + location (e.g., 'Oracle Corporation, Austin, TX')."""
+    # Company, City, State  OR  Company Name, City, State Country
+    match = re.match(
+        r'^([A-Z][\w\s&.\'-]+?)(?:\s*,\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),?\s*([A-Z]{2})?)?\s*$',
+        line.strip()
+    )
+    if match and not re.match(r'^[•\-\*◦▪►]', line.strip()):
+        return match.group(1).strip()
+    return None
+
+
+def _is_title_only_line(line: str) -> bool:
+    """Check if a line looks like a job title by itself (no company, no date)."""
+    stripped = line.strip()
+    if not stripped or len(stripped) < 5:
+        return False
+    # Skip bullets, dates, skill lines
+    if re.match(r'^[•\-\*◦▪►]', stripped):
+        return False
+    if _is_date_line(stripped):
+        return False
+    if re.match(r'^[\w\s/&]+:\s*\w+.*,', stripped):  # skill line
+        return False
+    # Title-like: starts with capital, 2-8 words, common title keywords
+    words = stripped.split()
+    if not (2 <= len(words) <= 8):
+        return False
+    title_keywords = r'(?:engineer|developer|intern|analyst|manager|lead|architect|consultant|assistant|associate|specialist|coordinator|director|designer|scientist|administrator|technician|researcher|fellow)'
+    return bool(re.search(title_keywords, stripped, re.IGNORECASE))
+
+
 def _extract_experience(lines: List[str], boundaries: Dict[str, int]) -> List[Experience]:
-    """Extract work experience with robust pattern matching."""
+    """
+    Extract work experience with robust pattern matching.
+
+    Handles both single-line and multi-line formats:
+      Single-line: "Software Engineer, Google, Jul 2022 - Present"
+      Multi-line:
+        Software Engineer Intern
+        Oracle Corporation, Austin, TX
+        May 2024 - Aug 2024
+        - Built microservices handling 50M+ requests
+    """
     section_lines = _get_section_lines(lines, boundaries, "experience")
     if not section_lines:
         return []
@@ -457,37 +515,65 @@ def _extract_experience(lines: List[str], boundaries: Dict[str, int]) -> List[Ex
     experience_list = []
     current: Optional[Experience] = None
     bullets: List[str] = []
-    multi_line_bullet = ""  # accumulator for bullets that wrap across lines
+    multi_line_bullet = ""
 
-    for line in section_lines:
-        # Try to match a job title line in common formats:
-        #   "Software Engineer | Oracle  May 2025 – Present"
-        #   "Software Engineer, Google, Jul 2022 - Present"
-        #   "Software Engineer, Google, Mountain View, CA, Jul 2022 - Present"
-        #   "Software Engineer at Oracle"
+    i = 0
+    while i < len(section_lines):
+        line = section_lines[i]
+        parsed_entry = False
 
-        # Format 1: "Title [|,] Company [|,spaces] Date"
-        title_match = re.match(
-            r'^([A-Z][\w\s/&-]+?)\s*[|,]\s*([A-Z][\w\s&.-]+?)(?:\s{2,}|\s*[|,]\s*|\s+)((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\w\s–\-]+(?:Present|\d{4}))?\s*$',
-            line
-        )
-        if not title_match:
-            # Format 2: "Title, Company, Location, Date" (skip location)
-            title_match2 = re.match(
-                r'^([A-Z][\w\s/&-]+?)\s*,\s*([A-Z][\w\s&.-]+?)\s*,\s*(?:[A-Z][\w\s]+,\s*[A-Z]{2}\s*,?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\w\s–\-]+(?:Present|\d{4}))\s*$',
-                line, re.IGNORECASE
-            )
-            if title_match2:
-                title_match = title_match2
-        if not title_match:
-            # Format 3: "Title at Company"
+        # ─── Try single-line formats first ───
+
+        # Format 0: Pipe-separated segments — "Title | Company | Location | Date"
+        # Split by pipes and identify which segment is title/company/date/location
+        if '|' in line and not re.match(r'^[•\-\*◦▪►]', line):
+            segments = [s.strip() for s in line.split('|') if s.strip()]
+            if len(segments) >= 2:
+                seg_title = None
+                seg_company = None
+                seg_dates = None
+                for seg in segments:
+                    d = _is_date_line(seg)
+                    if d and not seg_dates:
+                        seg_dates = d
+                    elif not seg_title:
+                        seg_title = seg
+                    elif not seg_company:
+                        seg_company = seg
+                    # else it's location or extra info — skip
+                if seg_title and seg_company:
+                    parsed_entry = True
+
+        if not parsed_entry:
+            seg_title = seg_company = seg_dates = None
+
+            # Format 1: "Title [|,] Company [|,spaces] Date"
             title_match = re.match(
-                r'^([A-Z][\w\s/&-]+?)\s+(?:at|@)\s+([A-Z][\w\s&.-]+)',
+                r'^([A-Z][\w\s/&-]+?)\s*[,]\s*([A-Z][\w\s&.\'-]+?)(?:\s{2,}|\s*[,]\s*|\s+)((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\w\s–\-]+(?:Present|\d{4}))?\s*$',
                 line
             )
+            if not title_match:
+                # Format 2: "Title, Company, Location, Date"
+                title_match = re.match(
+                    r'^([A-Z][\w\s/&-]+?)\s*,\s*([A-Z][\w\s&.\'-]+?)\s*,\s*(?:[A-Z][\w\s]+,\s*[A-Z]{2}\s*,?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\w\s–\-]+(?:Present|\d{4}))\s*$',
+                    line, re.IGNORECASE
+                )
+            if not title_match:
+                # Format 3: "Title at/@ Company"
+                title_match = re.match(
+                    r'^([A-Z][\w\s/&-]+?)\s+(?:at|@)\s+([A-Z][\w\s&.\'-]+)',
+                    line
+                )
 
-        if title_match:
-            # Save previous experience
+            if title_match:
+                seg_title = title_match.group(1).strip()
+                seg_company = title_match.group(2).strip()
+                if title_match.lastindex and title_match.lastindex >= 3 and title_match.group(3):
+                    seg_dates = title_match.group(3).strip()
+                parsed_entry = True
+
+        if parsed_entry and seg_title:
+            # Flush previous
             if current:
                 if multi_line_bullet:
                     bullets.append(multi_line_bullet.strip())
@@ -495,43 +581,104 @@ def _extract_experience(lines: List[str], boundaries: Dict[str, int]) -> List[Ex
                 current.bullets = bullets
                 experience_list.append(current)
 
-            title = title_match.group(1).strip()
-            company = title_match.group(2).strip()
-            dates = title_match.group(3).strip() if title_match.lastindex and title_match.lastindex >= 3 and title_match.group(3) else ""
-
-            current = Experience(title=title, company=company, dates=dates, bullets=[])
+            current = Experience(
+                title=seg_title, company=seg_company or "", dates=seg_dates or "", bullets=[]
+            )
             bullets = []
+            i += 1
             continue
 
-        # If we have a current experience, look for dates on their own line
-        if current and not current.dates:
-            date_match = re.search(
-                r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\.?\s+\d{4})\s*[-–—]\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\.?\s+\d{4}|Present|Current)',
-                line, re.IGNORECASE
-            )
-            if date_match:
-                current.dates = date_match.group(0)
+        # ─── Multi-line format: Title on its own line ───
+        if _is_title_only_line(line):
+            # Peek ahead for company and/or date lines
+            peek_company = None
+            peek_dates = None
+            peek_offset = 0
+
+            # Check next 1-2 lines for company and date
+            for j in range(1, min(3, len(section_lines) - i)):
+                next_line = section_lines[i + j]
+                if not peek_dates:
+                    d = _is_date_line(next_line)
+                    if d:
+                        peek_dates = d
+                        peek_offset = max(peek_offset, j)
+                        continue
+                if not peek_company:
+                    c = _is_company_location_line(next_line)
+                    if c:
+                        peek_company = c
+                        peek_offset = max(peek_offset, j)
+                        continue
+                # Also handle "Company, City, ST  |  Date" on same line
+                if not peek_company and not peek_dates:
+                    combo = re.match(
+                        r'^([A-Z][\w\s&.\'-]+?)\s*(?:,\s*[A-Z][\w\s]+(?:,\s*[A-Z]{2})?)?\s*[|]\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).*)',
+                        next_line, re.IGNORECASE
+                    )
+                    if combo:
+                        peek_company = combo.group(1).strip()
+                        peek_dates = combo.group(2).strip()
+                        peek_offset = max(peek_offset, j)
+                        continue
+
+            if peek_company or peek_dates:
+                # This is a multi-line experience entry
+                if current:
+                    if multi_line_bullet:
+                        bullets.append(multi_line_bullet.strip())
+                        multi_line_bullet = ""
+                    current.bullets = bullets
+                    experience_list.append(current)
+
+                current = Experience(
+                    title=line.strip(),
+                    company=peek_company or "",
+                    dates=peek_dates or "",
+                    bullets=[]
+                )
+                bullets = []
+                i += peek_offset + 1
                 continue
 
-        # Bullet points
+        # ─── Date line for current experience ───
+        if current and not current.dates:
+            d = _is_date_line(line)
+            if d:
+                current.dates = d
+                # Also extract GPA-like info if on same line
+                i += 1
+                continue
+
+        # ─── Company/location line for current experience ───
+        if current and not current.company:
+            c = _is_company_location_line(line)
+            if c:
+                current.company = c
+                i += 1
+                continue
+
+        # ─── Bullet points ───
         if current:
             bullet_match = re.match(r'^[•\-\*◦▪►]\s*(.*)', line)
             if bullet_match:
-                # Start of a new bullet
                 if multi_line_bullet:
                     bullets.append(multi_line_bullet.strip())
                 multi_line_bullet = bullet_match.group(1).strip()
-            elif multi_line_bullet and line and not line[0].isupper():
-                # Continuation of a wrapped bullet (starts lowercase)
-                multi_line_bullet += " " + line
-            elif multi_line_bullet and line:
-                # Could be a continuation of a bullet that wraps to a new line
-                # Check if it looks like a continuation (doesn't start a new entry)
-                if not re.match(r'^[A-Z][\w\s/&-]+?\s*[|,@]', line):
+                i += 1
+                continue
+            # Continuation of a wrapped bullet
+            if multi_line_bullet and line:
+                if not _is_title_only_line(line) and not re.match(r'^[A-Z][\w\s/&-]+?\s*[|,@]', line):
                     multi_line_bullet += " " + line
+                    i += 1
+                    continue
                 else:
                     bullets.append(multi_line_bullet.strip())
                     multi_line_bullet = ""
+                    continue  # re-process this line
+
+        i += 1
 
     # Flush last experience
     if current:
@@ -547,8 +694,42 @@ def _extract_experience(lines: List[str], boundaries: Dict[str, int]) -> List[Ex
 # Education Extraction
 # ═══════════════════════════════════════════════════════════
 
+def _is_degree_line(line: str) -> Optional[re.Match]:
+    """Check if a line contains a degree keyword. Returns the match or None."""
+    # Full words first (most reliable)
+    match = re.search(
+        r"\b(Master'?s?|Bachelor'?s?|PhD|Ph\.D\.?|Doctorate|Associate'?s?|MBA)"
+        r"(?:\s+(?:of|in|degree\s+in))?\s*(.*)",
+        line, re.IGNORECASE
+    )
+    if match:
+        return match
+    # Abbreviations — must be at START of line, prevents "Melbourne" matching "M.E."
+    match = re.match(
+        r"^\s*(B\.S\.?|M\.S\.?|B\.A\.?|M\.A\.?|B\.Tech\.?|M\.Tech\.?|B\.E\.?|M\.E\.?)"
+        r"(?:\s+(?:in|of))?\s*(.*)",
+        line, re.IGNORECASE
+    )
+    return match
+
+
+def _is_university_line(line: str) -> bool:
+    """Check if a line looks like a university/institution name."""
+    uni_keywords = r'(?:university|college|institute|school|academy|polytechnic|JNTU|IIT|NIT|MIT|Stanford|Harvard|Georgia\s+Tech)'
+    return bool(re.search(uni_keywords, line, re.IGNORECASE))
+
+
 def _extract_education(lines: List[str], boundaries: Dict[str, int]) -> List[Education]:
-    """Extract education entries."""
+    """
+    Extract education entries.
+
+    Handles both single-line and multi-line formats:
+      Single-line: "Master's in CS — Stanford University, CA (2024)"
+      Multi-line:
+        Master of Science in Computer Science
+        Florida Institute of Technology, Melbourne, FL
+        Aug 2023 - May 2025 | GPA: 3.9/4.0
+    """
     section_lines = _get_section_lines(lines, boundaries, "education")
     if not section_lines:
         return []
@@ -557,24 +738,19 @@ def _extract_education(lines: List[str], boundaries: Dict[str, int]) -> List[Edu
     current: Optional[Education] = None
 
     for line in section_lines:
-        # Match degree patterns
-        # "Master's in Computer Science — Florida Institute of Technology, Melbourne, FL (2024)"
-        # "Bachelor of Science in CS, University Name, 2020"
-        degree_match = re.search(
-            r"(Master'?s?|Bachelor'?s?|PhD|Ph\.D\.?|Doctorate|Associate'?s?|B\.S\.?|M\.S\.?|B\.A\.?|M\.A\.?|MBA)"
-            r"(?:\s+(?:of|in|degree\s+in))?\s*([\w\s&/,]+)",
-            line, re.IGNORECASE
-        )
+        degree_match = _is_degree_line(line)
 
         if degree_match:
+            # Flush previous
             if current:
                 education_list.append(current)
 
-            degree_type = degree_match.group(1)
+            degree_type = degree_match.group(1).strip()
             rest = degree_match.group(2).strip() if degree_match.group(2) else ""
 
-            # Try to split "Computer Science — University Name, City, State (Year)"
-            parts = re.split(r'\s*[—–-]\s*', rest, maxsplit=1)
+            # Try to find university on the SAME line
+            # Format: "Master's in Computer Science — University Name, City, ST (2024)"
+            parts = re.split(r'\s*[—–]\s*', rest, maxsplit=1)
             major = parts[0].strip().rstrip(",")
             university = ""
             location = ""
@@ -588,13 +764,36 @@ def _extract_education(lines: List[str], boundaries: Dict[str, int]) -> List[Edu
                     dates = year_match.group(1)
                     uni_part = uni_part[:year_match.start()].strip().rstrip(",")
 
-                # Extract location (last "City, ST" pattern)
+                # Extract location
                 loc_match = re.search(r',\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),?\s*([A-Z]{2})?\s*$', uni_part)
                 if loc_match:
                     location = loc_match.group(0).strip().lstrip(",").strip()
                     uni_part = uni_part[:loc_match.start()].strip().rstrip(",")
 
                 university = uni_part.strip()
+
+            # If university wasn't found on the same line, check if major includes
+            # "Computer Science, University Name, 2018 - 2022" (comma-separated on same line)
+            if not university and "," in major:
+                major_parts = [p.strip() for p in major.split(",")]
+                # Extract dates from the end
+                for idx in range(len(major_parts) - 1, -1, -1):
+                    d = re.search(r'(\d{4})\s*[-–—]\s*(\d{4}|Present)', major_parts[idx])
+                    if d:
+                        if not dates:
+                            dates = d.group(0)
+                        major_parts.pop(idx)
+                        break
+                    # Also catch standalone year
+                    if re.match(r'^\d{4}$', major_parts[idx].strip()):
+                        major_parts.pop(idx)
+                        break
+                # Find university in remaining parts
+                for idx, part in enumerate(major_parts):
+                    if _is_university_line(part):
+                        university = ", ".join(major_parts[idx:]).strip()
+                        major = ", ".join(major_parts[:idx]).strip()
+                        break
 
             current = Education(
                 degree=f"{degree_type} in {major}" if major else degree_type,
@@ -606,25 +805,46 @@ def _extract_education(lines: List[str], boundaries: Dict[str, int]) -> List[Edu
             )
             continue
 
+        # ── University on a separate line (multi-line format) ──
+        if current and not current.university and _is_university_line(line):
+            # "Florida Institute of Technology, Melbourne, FL"
+            loc_match = re.search(r',\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),?\s*([A-Z]{2})?\s*$', line)
+            if loc_match:
+                current.location = loc_match.group(0).strip().lstrip(",").strip()
+                current.university = line[:loc_match.start()].strip().rstrip(",")
+            else:
+                current.university = line.strip()
+            continue
+
         if current:
-            # GPA
+            # ── GPA ──
             gpa_match = re.search(r'GPA[:\s]+([\d.]+)', line, re.IGNORECASE)
             if gpa_match:
                 current.gpa = gpa_match.group(1)
 
-            # Coursework
+            # ── Coursework ──
             if re.search(r'coursework|courses', line, re.IGNORECASE):
-                # Extract items after the colon
                 coursework_text = re.sub(r'.*(?:coursework|courses)\s*:?\s*', '', line, flags=re.IGNORECASE)
                 if coursework_text:
                     items = [c.strip() for c in re.split(r'[,;•]', coursework_text) if c.strip()]
                     current.coursework = items
 
-            # Dates on own line
+            # ── Dates on own line ──
             if not current.dates:
-                date_match = re.search(r'(\d{4})\s*[-–—]\s*(\d{4}|Present)', line)
+                # "Aug 2023 - May 2025", "2020 - 2024", also with pipe: "Aug 2023 - May 2025 | GPA: 3.9"
+                date_match = re.search(
+                    r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\.?\s+\d{4})\s*[-–—]\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\.?\s+\d{4}|Present|Current)',
+                    line, re.IGNORECASE
+                )
+                if not date_match:
+                    date_match = re.search(r'(\d{4})\s*[-–—]\s*(\d{4}|Present)', line)
                 if date_match:
                     current.dates = date_match.group(0)
+                    # Check for GPA on same line as dates (e.g., "Aug 2023 - May 2025 | GPA: 3.9")
+                    if not current.gpa:
+                        gpa2 = re.search(r'GPA[:\s]+([\d.]+)', line, re.IGNORECASE)
+                        if gpa2:
+                            current.gpa = gpa2.group(1)
 
     if current:
         education_list.append(current)
